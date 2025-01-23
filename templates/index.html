@@ -71,7 +71,7 @@
                     ctx.fill();
                 });
 
-                // Draw distance between index finger and thumb
+                // Draw distance and angle between index finger and thumb
                 const indexFinger = hand.landmarks[8];
                 const thumb = hand.landmarks[4];
                 const distance = Math.sqrt(
@@ -79,10 +79,24 @@
                         Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
                 );
 
-                ctx.fillStyle = "#0000FF"; // Blue for distance text
+                const angle =
+                    Math.atan2(
+                        (indexFinger[1] - thumb[1]) * scaleY,
+                        (indexFinger[0] - thumb[0]) * scaleX
+                    ) *
+                    (180 / Math.PI);
+
+                ctx.strokeStyle = "#0000FF"; // Blue for line
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(indexFinger[0] * scaleX, indexFinger[1] * scaleY);
+                ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
+                ctx.stroke();
+
+                ctx.fillStyle = "#0000FF"; // Blue for text
                 ctx.font = "16px Arial";
                 ctx.fillText(
-                    distance.toFixed(2) + "px",
+                    distance.toFixed(2) + "px, " + angle.toFixed(2) + "°",
                     (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
                     (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2
                 );

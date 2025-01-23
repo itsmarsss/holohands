@@ -6,33 +6,39 @@
             body {
                 margin: 0;
                 overflow: hidden;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                background-color: black;
             }
             #container {
                 position: relative;
-                width: 640px;
-                height: 480px;
-            }
-            #videoFeed {
-                position: absolute;
-                left: 0;
-                top: 0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                width: 100%;
+                height: 100%;
             }
             #overlay {
                 position: absolute;
-                left: 0;
-                top: 0;
                 pointer-events: none;
             }
         </style>
     </head>
     <body>
         <div id="container">
-            <img id="videoFeed" src="" />
-            <canvas id="overlay" width="640" height="480"></canvas>
+            <video
+                id="videoFeed"
+                autoplay
+                playsinline
+                style="display: none"
+            ></video>
+            <canvas id="overlay"></canvas>
         </div>
 
         <script>
-            const videoFeed = document.getElementById("videoFeed");
+            const video = document.getElementById("videoFeed");
             const canvas = document.getElementById("overlay");
             const ctx = canvas.getContext("2d");
             const ws = new WebSocket("ws://" + window.location.host + "/ws");
@@ -42,6 +48,23 @@
                 Left: "#FF0000", // Red
                 Right: "#00FF00", // Green
             };
+
+            function resizeCanvas() {
+                const aspectRatio = 640 / 480;
+                const windowAspectRatio =
+                    window.innerWidth / window.innerHeight;
+
+                if (windowAspectRatio > aspectRatio) {
+                    canvas.width = window.innerHeight * aspectRatio;
+                    canvas.height = window.innerHeight;
+                } else {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerWidth / aspectRatio;
+                }
+
+                canvas.style.width = canvas.width + "px";
+                canvas.style.height = canvas.height + "px";
+            }
 
             function drawHand(hand, imgWidth, imgHeight) {
                 // Scale coordinates to video feed size
@@ -105,26 +128,57 @@
             // Update the message handler
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                videoFeed.src = "data:image/jpeg;base64," + data.frame;
+                const image = new Image();
+                image.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
+                    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
-
-                if (data.hands.length > 0) {
-                    data.hands.forEach((hand) => {
-                        drawHand(
-                            hand,
-                            data.image_size.width,
-                            data.image_size.height
-                        );
-                    });
-                }
+                    if (data.hands.length > 0) {
+                        data.hands.forEach((hand) => {
+                            drawHand(
+                                hand,
+                                data.image_size.width,
+                                data.image_size.height
+                            );
+                        });
+                    }
+                };
+                image.src = "data:image/jpeg;base64," + data.frame;
             };
 
             // Handle window resize
-            window.addEventListener("resize", () => {
-                canvas.style.width = videoFeed.clientWidth + "px";
-                canvas.style.height = videoFeed.clientHeight + "px";
-            });
+            window.addEventListener("resize", resizeCanvas);
+            resizeCanvas(); // Initial resize
+
+            // Stream webcam data to the backend
+            navigator.mediaDevices
+                .getUserMedia({ video: true })
+                .then((stream) => {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        const sendFrame = () => {
+                            const offscreenCanvas =
+                                document.createElement("canvas");
+                            offscreenCanvas.width = video.videoWidth;
+                            offscreenCanvas.height = video.videoHeight;
+                            const offscreenCtx =
+                                offscreenCanvas.getContext("2d");
+                            offscreenCtx.drawImage(
+                                video,
+                                0,
+                                0,
+                                offscreenCanvas.width,
+                                offscreenCanvas.height
+                            );
+                            ws.send(
+                                offscreenCanvas.toDataURL("image/webp", 0.75)
+                            ); // Use WebP format with 75% quality
+                            setTimeout(sendFrame, 33); // Aim for ~30 FPS
+                        };
+                        sendFrame();
+                    };
+                });
         </script>
     </body>
 </html>

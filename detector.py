@@ -7,8 +7,8 @@ class HandDetector:
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5)
+            min_detection_confidence=0.75,
+            min_tracking_confidence=0.75)
     
     def detect(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

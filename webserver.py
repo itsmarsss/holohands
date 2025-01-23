@@ -4,14 +4,17 @@ eventlet.monkey_patch()
 from flask import Flask, render_template
 import cv2
 import mediapipe as mp
+import numpy as np
 import base64
 import json
 from eventlet import wsgi
 from eventlet.websocket import WebSocketWSGI
+from io import BytesIO
+from PIL import Image
 
 app = Flask(__name__)
 
-# MediaPipe setup with image dimensions
+# MediaPipe setup
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
@@ -26,46 +29,40 @@ def index():
 
 @WebSocketWSGI
 def handle_websocket(ws):
-    cap = cv2.VideoCapture(0)
     try:
         while True:
-            success, frame = cap.read()
-            if not success:
+            message = ws.wait()
+            if message is None:
                 break
-            
-            # Process frame with dimensions
-            frame = cv2.flip(frame, 1)
-            frame = cv2.resize(frame, (640, 480))
+
+            # Decode the base64 image
+            image_data = base64.b64decode(message.split(",")[1])
+            image = Image.open(BytesIO(image_data))
+            frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+            # Process frame
             h, w = frame.shape[:2]
-            
-            # Convert to base64
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            jpg_b64 = base64.b64encode(buffer).decode('utf-8')
-            
-            # Detect hands with image dimensions
             results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             hands_data = []
             if results.multi_hand_landmarks:
                 for idx, landmarks in enumerate(results.multi_hand_landmarks):
                     handedness = results.multi_handedness[idx].classification[0].label
-                    # Convert connections to list of lists
                     connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
                     hands_data.append({
                         'handedness': handedness,
                         'landmarks': [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark],
                         'connections': connections
                     })
-            
+
             # Send combined data
             ws.send(json.dumps({
-                'frame': jpg_b64,
+                'frame': message.split(",")[1],
                 'hands': hands_data,
                 'image_size': {'width': w, 'height': h}
             }))
-            
-            eventlet.sleep(0.033)
-    finally:
-        cap.release()
+
+    except Exception as e:
+        print("WebSocket error:", str(e))
 
 def combined_app(environ, start_response):
     path = environ['PATH_INFO']

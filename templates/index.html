@@ -28,12 +28,7 @@
     </head>
     <body>
         <div id="container">
-            <video
-                id="videoFeed"
-                autoplay
-                playsinline
-                style="display: none"
-            ></video>
+            <video id="videoFeed" autoplay playsinline></video>
             <canvas id="overlay"></canvas>
         </div>
 
@@ -67,6 +62,8 @@
             }
 
             function drawHand(hand, imgWidth, imgHeight) {
+                console.log(hand);
+
                 // Scale coordinates to video feed size
                 const scaleX = canvas.width / imgWidth;
                 const scaleY = canvas.height / imgHeight;
@@ -119,31 +116,78 @@
                 ctx.fillStyle = "#0000FF"; // Blue for text
                 ctx.font = "16px Arial";
                 ctx.fillText(
-                    distance.toFixed(2) + "px, " + angle.toFixed(2) + "°",
+                    distance.toFixed(2) + "px, " + -angle.toFixed(2) + "°",
                     (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
                     (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2
+                );
+
+                // Print "<Hand> - hold" if distance is less than 50 pixels
+                if (distance < 50) {
+                    ctx.fillText(
+                        `${hand.handedness} - hold`,
+                        (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
+                        (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2 + 20
+                    );
+                    console.log(`${hand.handedness} - hold`);
+                }
+
+                // Draw cursor (midpoint between index finger and thumb)
+                const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+                const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+                ctx.fillStyle = "#FFFF00"; // Yellow for cursor
+                ctx.beginPath();
+                ctx.arc(cursorX, cursorY, 5, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // Calculate and draw the angle of the entire hand
+                const wrist = hand.landmarks[0];
+                const middleFingerMCP = hand.landmarks[9];
+                const ringFingerMCP = hand.landmarks[13];
+
+                // Calculate the midpoint of the two MCPs
+                const midpointMCP = [
+                    (middleFingerMCP[0] + ringFingerMCP[0]) / 2,
+                    (middleFingerMCP[1] + ringFingerMCP[1]) / 2,
+                ];
+
+                ctx.strokeStyle = "#00FFFF"; // Cyan for line
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(midpointMCP[0] * scaleX, midpointMCP[1] * scaleY);
+                ctx.lineTo(wrist[0] * scaleX, wrist[1] * scaleY);
+                ctx.stroke();
+
+                // Calculate the angle between the wrist and the midpoint of the MCPs
+                const handAngle = Math.atan2(
+                    (midpointMCP[1] - wrist[1]) * scaleY,
+                    (midpointMCP[0] - wrist[0]) * scaleX
+                );
+
+                ctx.fillStyle = "#FFFFFF"; // White for hand angle text
+                ctx.fillText(
+                    "Hand angle: " +
+                        (-handAngle * (180 / Math.PI)).toFixed(2) +
+                        "°",
+                    wrist[0] * scaleX,
+                    wrist[1] * scaleY - 10
                 );
             }
 
             // Update the message handler
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                const image = new Image();
-                image.onload = () => {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
-                    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                    if (data.hands.length > 0) {
-                        data.hands.forEach((hand) => {
-                            drawHand(
-                                hand,
-                                data.image_size.width,
-                                data.image_size.height
-                            );
-                        });
-                    }
-                };
-                image.src = "data:image/jpeg;base64," + data.frame;
+                if (data.hands.length > 0) {
+                    data.hands.forEach((hand) => {
+                        drawHand(
+                            hand,
+                            data.image_size.width,
+                            data.image_size.height
+                        );
+                    });
+                }
             };
 
             // Handle window resize
@@ -171,9 +215,7 @@
                                 offscreenCanvas.width,
                                 offscreenCanvas.height
                             );
-                            ws.send(
-                                offscreenCanvas.toDataURL("image/webp", 0.75)
-                            ); // Use WebP format with 75% quality
+                            ws.send(offscreenCanvas.toDataURL("image/webp", 1)); // Use WebP format with 75% quality
                             setTimeout(sendFrame, 33); // Aim for ~30 FPS
                         };
                         sendFrame();

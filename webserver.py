@@ -54,9 +54,8 @@ def handle_websocket(ws):
                         'connections': connections
                     })
 
-            # Send combined data
+            # Send hand landmarks data
             ws.send(json.dumps({
-                'frame': message.split(",")[1],
                 'hands': hands_data,
                 'image_size': {'width': w, 'height': h}
             }))

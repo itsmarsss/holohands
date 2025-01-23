@@ -44,6 +44,10 @@
                 Right: "#00FF00", // Green
             };
 
+            const smoothingFactor = 0.5; // Adjust this value to control smoothing
+            let previousPointerAngle = null; // Initialize previous angle variable
+            let previousHandAngle = null; // Initialize previous angle variable
+
             function resizeCanvas() {
                 const aspectRatio = 640 / 480;
                 const windowAspectRatio =
@@ -99,12 +103,22 @@
                         Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
                 );
 
-                const angle =
+                const currentPointerAngle =
                     Math.atan2(
                         (indexFinger[1] - thumb[1]) * scaleY,
                         (indexFinger[0] - thumb[0]) * scaleX
                     ) *
                     (180 / Math.PI);
+
+                // Smooth the angle using exponential moving average
+                const pointerAngle =
+                    previousPointerAngle === null
+                        ? currentPointerAngle
+                        : previousPointerAngle * (1 - smoothingFactor) +
+                          currentPointerAngle * smoothingFactor;
+
+                // Update the previous angle
+                previousPointerAngle = pointerAngle;
 
                 ctx.strokeStyle = "#0000FF"; // Blue for line
                 ctx.lineWidth = 1;
@@ -116,7 +130,10 @@
                 ctx.fillStyle = "#0000FF"; // Blue for text
                 ctx.font = "16px Arial";
                 ctx.fillText(
-                    distance.toFixed(2) + "px, " + -angle.toFixed(2) + "°",
+                    distance.toFixed(2) +
+                        "px, " +
+                        -pointerAngle.toFixed(2) +
+                        "°",
                     (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
                     (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2
                 );
@@ -158,10 +175,20 @@
                 ctx.stroke();
 
                 // Calculate the angle between the wrist and the midpoint of the MCPs
-                const handAngle = Math.atan2(
+                const currentHandAngle = Math.atan2(
                     (midpointMCP[1] - wrist[1]) * scaleY,
                     (midpointMCP[0] - wrist[0]) * scaleX
                 );
+
+                // Smooth the angle using exponential moving average
+                const handAngle =
+                    previousHandAngle === null
+                        ? currentHandAngle
+                        : previousHandAngle * (1 - smoothingFactor) +
+                          currentHandAngle * smoothingFactor;
+
+                // Update the previous angle
+                previousHandAngle = handAngle;
 
                 ctx.fillStyle = "#FFFFFF"; // White for hand angle text
                 ctx.fillText(

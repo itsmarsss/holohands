@@ -42,8 +42,17 @@ def save_handsymbol():
     wrist = landmarks[0]
     normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in landmarks]
 
+    # Rotate landmarks to a consistent orientation
+    middle_finger_mcp = normalized_landmarks[9]
+    angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
+    rotation_matrix = np.array([
+        [np.cos(-angle), -np.sin(-angle)],
+        [np.sin(-angle), np.cos(-angle)]
+    ])
+    rotated_landmarks = [(np.dot(rotation_matrix, [lm[0], lm[1]]).tolist() + [lm[2]]) for lm in normalized_landmarks]
+
     # Flatten the normalized points into a 1-D array
-    flattened_landmarks = [coord for lm in normalized_landmarks for coord in lm]
+    flattened_landmarks = [coord for lm in rotated_landmarks for coord in lm]
 
     # Store the normalized points in a 21 dimension vector
     hand_symbols.append({
@@ -81,8 +90,17 @@ def handle_websocket(ws):
                     wrist = hand_landmarks[0]
                     normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in hand_landmarks]
 
+                    # Rotate landmarks to a consistent orientation
+                    middle_finger_mcp = normalized_landmarks[9]
+                    angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
+                    rotation_matrix = np.array([
+                        [np.cos(-angle), -np.sin(-angle)],
+                        [np.sin(-angle), np.cos(-angle)]
+                    ])
+                    rotated_landmarks = [(np.dot(rotation_matrix, [lm[0], lm[1]]).tolist() + [lm[2]]) for lm in normalized_landmarks]
+
                     # Flatten the normalized points into a 1-D array
-                    flattened_landmarks = [coord for lm in normalized_landmarks for coord in lm]
+                    flattened_landmarks = [coord for lm in rotated_landmarks for coord in lm]
 
                     # Check for matching symbols using cosine similarity
                     similarities = []

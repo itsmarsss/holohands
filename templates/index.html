@@ -81,7 +81,8 @@
             let previousPointerAngle = null; // Initialize previous angle variable
             let previousHandAngle = null; // Initialize previous angle variable
             let currentHandsData = []; // Store current hands data
-            let drawnPoints = []; // Store drawn points
+            let drawnPoints = { Left: [], Right: [] }; // Store drawn points for each hand
+            let isDrawing = { Left: false, Right: false }; // Track drawing state for each hand
 
             function resizeCanvas() {
                 const aspectRatio = 640 / 480;
@@ -185,7 +186,15 @@
                     // Draw on the canvas
                     const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
                     const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
-                    drawnPoints.push({ x: cursorX, y: cursorY });
+                    if (!isDrawing[hand.handedness]) {
+                        drawnPoints[hand.handedness].push([]);
+                        isDrawing[hand.handedness] = true;
+                    }
+                    drawnPoints[hand.handedness][
+                        drawnPoints[hand.handedness].length - 1
+                    ].push({ x: cursorX, y: cursorY });
+                } else {
+                    isDrawing[hand.handedness] = false;
                 }
 
                 // Draw cursor (midpoint between index finger and thumb)
@@ -253,14 +262,27 @@
             }
 
             function drawPoints() {
-                ctx.strokeStyle = "#FF0000"; // Red for drawn lines
+                ctx.strokeStyle = "#FF0000"; // Red for left hand drawn lines
                 ctx.lineWidth = 2;
-                for (let i = 1; i < drawnPoints.length; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(drawnPoints[i - 1].x, drawnPoints[i - 1].y);
-                    ctx.lineTo(drawnPoints[i].x, drawnPoints[i].y);
-                    ctx.stroke();
-                }
+                drawnPoints.Left.forEach((stroke) => {
+                    for (let i = 1; i < stroke.length; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
+                        ctx.lineTo(stroke[i].x, stroke[i].y);
+                        ctx.stroke();
+                    }
+                });
+
+                ctx.strokeStyle = "#00FF00"; // Green for right hand drawn lines
+                ctx.lineWidth = 2;
+                drawnPoints.Right.forEach((stroke) => {
+                    for (let i = 1; i < stroke.length; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
+                        ctx.lineTo(stroke[i].x, stroke[i].y);
+                        ctx.stroke();
+                    }
+                });
             }
 
             // Update the message handler

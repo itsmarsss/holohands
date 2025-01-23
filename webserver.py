@@ -76,8 +76,6 @@ def handle_websocket(ws):
             image = Image.open(BytesIO(image_data))
             frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-            frame = cv2.resize(frame, (640, 480))
-
             # Process frame
             h, w = frame.shape[:2]
             results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))

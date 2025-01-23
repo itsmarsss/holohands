@@ -1,91 +1,77 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO
-import webbrowser
+from flask import Flask, render_template
 import cv2
 import mediapipe as mp
-from threading import Timer
+import base64
+import json
+from eventlet import wsgi
+from eventlet.websocket import WebSocketWSGI
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# MediaPipe Hands setup
+# MediaPipe setup with image dimensions
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=2,
-    min_detection_confidence=0.5,
+    min_detection_confidence=0.7,
     min_tracking_confidence=0.5
 )
-
-def send_hand_data(data):
-    """Send data to all connected clients"""
-    socketio.emit('hand_data', data)
-
-def video_processing():
-    """Main processing loop"""
-    cap = cv2.VideoCapture(0)
-    while True:
-        success, frame = cap.read()
-        if not success:
-            continue
-        
-        # Process frame
-        frame = cv2.flip(frame, 1)
-        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(image)
-        
-        # Prepare data for streaming
-        hands_data = []
-        if results.multi_hand_landmarks:
-            for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                handedness = results.multi_handedness[idx].classification[0].label
-                landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]
-                
-                # Convert frozenset to list of lists
-                connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
-                
-                hands_data.append({
-                    'handedness': handedness,
-                    'landmarks': landmarks,
-                    'connections': connections  # Now serializable
-                })
-        
-        # Stream data to clients
-        if hands_data:
-            try:
-                send_hand_data(hands_data)
-            except Exception as e:
-                print("Stream error:", e)
-        
-        print(hands_data)
-        
-        eventlet.sleep(0.001)  # Yield to other threads
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected:', request.sid)
+@WebSocketWSGI
+def handle_websocket(ws):
+    cap = cv2.VideoCapture(0)
+    try:
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
+            
+            # Process frame with dimensions
+            frame = cv2.flip(frame, 1)
+            frame = cv2.resize(frame, (640, 480))
+            h, w = frame.shape[:2]
+            
+            # Convert to base64
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            jpg_b64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Detect hands with image dimensions
+            results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            hands_data = []
+            if results.multi_hand_landmarks:
+                for idx, landmarks in enumerate(results.multi_hand_landmarks):
+                    handedness = results.multi_handedness[idx].classification[0].label
+                    # Convert connections to list of lists
+                    connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
+                    hands_data.append({
+                        'handedness': handedness,
+                        'landmarks': [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark],
+                        'connections': connections
+                    })
+            
+            # Send combined data
+            ws.send(json.dumps({
+                'frame': jpg_b64,
+                'hands': hands_data,
+                'image_size': {'width': w, 'height': h}
+            }))
+            
+            eventlet.sleep(0.033)
+    finally:
+        cap.release()
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected:', request.sid)
-
-def start_processing():
-    """Start video processing in eventlet thread"""
-    socketio.start_background_task(video_processing)
+def combined_app(environ, start_response):
+    path = environ['PATH_INFO']
+    if path == '/ws':
+        return handle_websocket(environ, start_response)
+    return app(environ, start_response)
 
 if __name__ == '__main__':
-    # Start processing when server starts
-    Timer(1, start_processing).start()
-    
-    # Open browser automatically
-    webbrowser.open('http://localhost:6969')
-    
-    # Start server
-    socketio.run(app, host='0.0.0.0', port=6969, debug=False)
+    wsgi.server(eventlet.listen(('0.0.0.0', 6969)), combined_app)

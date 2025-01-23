@@ -1,61 +1,116 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Hand Tracking Stream</title>
+        <title>Hand Tracking</title>
         <style>
             body {
                 margin: 0;
-                font-family: Arial;
+                overflow: hidden;
             }
-            #status {
-                position: fixed;
-                top: 10px;
-                left: 10px;
-                background: rgba(0, 0, 0, 0.7);
-                color: white;
-                padding: 10px;
-                border-radius: 5px;
-                z-index: 1000;
+            #container {
+                position: relative;
+                width: 640px;
+                height: 480px;
+            }
+            #videoFeed {
+                position: absolute;
+                left: 0;
+                top: 0;
+            }
+            #overlay {
+                position: absolute;
+                left: 0;
+                top: 0;
+                pointer-events: none;
             }
         </style>
     </head>
     <body>
-        <div id="status">Connecting...</div>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+        <div id="container">
+            <img id="videoFeed" src="" />
+            <canvas id="overlay" width="640" height="480"></canvas>
+        </div>
+
         <script>
-            const statusEl = document.getElementById("status");
-            let socket;
+            const videoFeed = document.getElementById("videoFeed");
+            const canvas = document.getElementById("overlay");
+            const ctx = canvas.getContext("2d");
+            const ws = new WebSocket("ws://" + window.location.host + "/ws");
 
-            function connectWebSocket() {
-                socket = io("http://localhost:6969", {
-                    reconnection: true,
-                    reconnectionDelay: 1000,
-                    transports: ["websocket"],
+            // Colors for different hands
+            const handColors = {
+                Left: "#FF0000", // Red
+                Right: "#00FF00", // Green
+            };
+
+            function drawHand(hand, imgWidth, imgHeight) {
+                // Scale coordinates to video feed size
+                const scaleX = canvas.width / imgWidth;
+                const scaleY = canvas.height / imgHeight;
+
+                // Draw connections
+                ctx.strokeStyle = handColors[hand.handedness];
+                ctx.lineWidth = 2;
+                hand.connections.forEach(([start, end]) => {
+                    const startX = hand.landmarks[start][0] * scaleX;
+                    const startY = hand.landmarks[start][1] * scaleY;
+                    const endX = hand.landmarks[end][0] * scaleX;
+                    const endY = hand.landmarks[end][1] * scaleY;
+
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(endX, endY);
+                    ctx.stroke();
                 });
 
-                socket.on("connect", () => {
-                    statusEl.textContent = "Connected! Waiting for data...";
-                    console.log("Socket connected:", socket.id);
+                // Draw landmarks
+                ctx.fillStyle = handColors[hand.handedness];
+                hand.landmarks.forEach((lm) => {
+                    ctx.beginPath();
+                    ctx.arc(lm[0] * scaleX, lm[1] * scaleY, 3, 0, 2 * Math.PI);
+                    ctx.fill();
                 });
 
-                socket.on("hand_data", (data) => {
-                    statusEl.textContent = `Tracking ${data.length} hands`;
-                    console.log("Hand data:", data);
-                    // Add your visualization code here
-                });
+                // Draw distance between index finger and thumb
+                const indexFinger = hand.landmarks[8];
+                const thumb = hand.landmarks[4];
+                const distance = Math.sqrt(
+                    Math.pow((indexFinger[0] - thumb[0]) * scaleX, 2) +
+                        Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
+                );
 
-                socket.on("disconnect", () => {
-                    statusEl.textContent = "Disconnected!";
-                });
-
-                socket.on("connect_error", (error) => {
-                    statusEl.textContent = `Connection error: ${error.message}`;
-                    console.error("Connection error:", error);
-                });
+                ctx.fillStyle = "#0000FF"; // Blue for distance text
+                ctx.font = "16px Arial";
+                ctx.fillText(
+                    distance.toFixed(2) + "px",
+                    (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
+                    (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2
+                );
             }
 
-            // Start connection
-            connectWebSocket();
+            // Update the message handler
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                videoFeed.src = "data:image/jpeg;base64," + data.frame;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
+
+                if (data.hands.length > 0) {
+                    data.hands.forEach((hand) => {
+                        drawHand(
+                            hand,
+                            data.image_size.width,
+                            data.image_size.height
+                        );
+                    });
+                }
+            };
+
+            // Handle window resize
+            window.addEventListener("resize", () => {
+                canvas.style.width = videoFeed.clientWidth + "px";
+                canvas.style.height = videoFeed.clientHeight + "px";
+            });
         </script>
     </body>
 </html>

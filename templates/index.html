@@ -81,6 +81,7 @@
             let previousPointerAngle = null; // Initialize previous angle variable
             let previousHandAngle = null; // Initialize previous angle variable
             let currentHandsData = []; // Store current hands data
+            let drawnPoints = []; // Store drawn points
 
             function resizeCanvas() {
                 const aspectRatio = 640 / 480;
@@ -180,6 +181,11 @@
                         (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2 + 20
                     );
                     console.log(`${hand.handedness} - hold`);
+
+                    // Draw on the canvas
+                    const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+                    const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+                    drawnPoints.push({ x: cursorX, y: cursorY });
                 }
 
                 // Draw cursor (midpoint between index finger and thumb)
@@ -246,11 +252,31 @@
                 }
             }
 
+            function drawPoints() {
+                ctx.strokeStyle = "#FF0000"; // Red for drawn lines
+                ctx.lineWidth = 2;
+                for (let i = 1; i < drawnPoints.length; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(drawnPoints[i - 1].x, drawnPoints[i - 1].y);
+                    ctx.lineTo(drawnPoints[i].x, drawnPoints[i].y);
+                    ctx.stroke();
+                }
+            }
+
             // Update the message handler
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas before drawing
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.scale(-1, 1); // Reflect the canvas horizontally
+                ctx.drawImage(
+                    video,
+                    -canvas.width,
+                    0,
+                    canvas.width,
+                    canvas.height
+                );
+                ctx.restore();
 
                 if (data.hands.length > 0) {
                     currentHandsData = data.hands; // Store current hands data
@@ -262,6 +288,9 @@
                         );
                     });
                 }
+
+                // Draw previously drawn points
+                drawPoints();
             };
 
             // Handle window resize
@@ -282,9 +311,10 @@
                             offscreenCanvas.height = video.videoHeight;
                             const offscreenCtx =
                                 offscreenCanvas.getContext("2d");
+                            offscreenCtx.scale(-1, 1); // Reflect the video feed horizontally
                             offscreenCtx.drawImage(
                                 video,
-                                0,
+                                -offscreenCanvas.width,
                                 0,
                                 offscreenCanvas.width,
                                 offscreenCanvas.height

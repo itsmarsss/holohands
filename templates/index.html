@@ -35,6 +35,15 @@
             .control-group {
                 margin-bottom: 10px;
             }
+            .cursor {
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: yellow;
+                pointer-events: none;
+                z-index: 10;
+            }
         </style>
     </head>
     <body>
@@ -63,6 +72,8 @@
                     </button>
                 </div>
             </div>
+            <div id="leftCursor" class="cursor"></div>
+            <div id="rightCursor" class="cursor"></div>
         </div>
 
         <script>
@@ -70,6 +81,9 @@
             const canvas = document.getElementById("overlay");
             const ctx = canvas.getContext("2d");
             const ws = new WebSocket("ws://" + window.location.host + "/ws");
+
+            const leftCursor = document.getElementById("leftCursor");
+            const rightCursor = document.getElementById("rightCursor");
 
             // Colors for different hands
             const handColors = {
@@ -85,7 +99,7 @@
             let isDrawing = { Left: false, Right: false }; // Track drawing state for each hand
 
             function resizeCanvas() {
-                const aspectRatio = 640 / 480;
+                const aspectRatio = 1920 / 1080;
                 const windowAspectRatio =
                     window.innerWidth / window.innerHeight;
 
@@ -102,8 +116,6 @@
             }
 
             function drawHand(hand, imgWidth, imgHeight) {
-                console.log(hand);
-
                 // Scale coordinates to video feed size
                 const scaleX = canvas.width / imgWidth;
                 const scaleY = canvas.height / imgHeight;
@@ -174,6 +186,21 @@
                     (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2
                 );
 
+                const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+                const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+
+                const xOffset = canvas.getBoundingClientRect().left;
+                const yOffset = canvas.getBoundingClientRect().top;
+
+                // Move the cursor element
+                if (hand.handedness === "Left") {
+                    leftCursor.style.left = `${cursorX - 10 + xOffset}px`;
+                    leftCursor.style.top = `${cursorY - 10 + yOffset}px`;
+                } else {
+                    rightCursor.style.left = `${cursorX - 10 + xOffset}px`;
+                    rightCursor.style.top = `${cursorY - 10 + yOffset}px`;
+                }
+
                 // Print "<Hand> - hold" if distance is less than 50 pixels
                 if (distance < 50) {
                     ctx.fillText(
@@ -184,8 +211,6 @@
                     console.log(`${hand.handedness} - hold`);
 
                     // Draw on the canvas
-                    const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
-                    const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
                     if (!isDrawing[hand.handedness]) {
                         drawnPoints[hand.handedness].push([]);
                         isDrawing[hand.handedness] = true;
@@ -198,11 +223,11 @@
                 }
 
                 // Draw cursor (midpoint between index finger and thumb)
-                const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
-                const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+                const cursorXMid = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+                const cursorYMid = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
                 ctx.fillStyle = "#FFFF00"; // Yellow for cursor
                 ctx.beginPath();
-                ctx.arc(cursorX, cursorY, 5, 0, 2 * Math.PI);
+                ctx.arc(cursorXMid, cursorYMid, 5, 0, 2 * Math.PI);
                 ctx.fill();
 
                 // Calculate and draw the angle of the entire hand

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Hand Tracking Stream</title>
+        <style>
+            body {
+                margin: 0;
+                font-family: Arial;
+            }
+            #status {
+                position: fixed;
+                top: 10px;
+                left: 10px;
+                background: rgba(0, 0, 0, 0.7);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                z-index: 1000;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="status">Connecting...</div>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+        <script>
+            const statusEl = document.getElementById("status");
+            let socket;
+
+            function connectWebSocket() {
+                socket = io("http://localhost:6969", {
+                    reconnection: true,
+                    reconnectionDelay: 1000,
+                    transports: ["websocket"],
+                });
+
+                socket.on("connect", () => {
+                    statusEl.textContent = "Connected! Waiting for data...";
+                    console.log("Socket connected:", socket.id);
+                });
+
+                socket.on("hand_data", (data) => {
+                    statusEl.textContent = `Tracking ${data.length} hands`;
+                    console.log("Hand data:", data);
+                    // Add your visualization code here
+                });
+
+                socket.on("disconnect", () => {
+                    statusEl.textContent = "Disconnected!";
+                });
+
+                socket.on("connect_error", (error) => {
+                    statusEl.textContent = `Connection error: ${error.message}`;
+                    console.error("Connection error:", error);
+                });
+            }
+
+            // Start connection
+            connectWebSocket();
+        </script>
+    </body>
+</html>

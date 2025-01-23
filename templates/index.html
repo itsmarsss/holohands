@@ -24,12 +24,45 @@
                 position: absolute;
                 pointer-events: none;
             }
+            #controls {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                z-index: 10;
+                display: flex;
+                flex-direction: column;
+            }
+            .control-group {
+                margin-bottom: 10px;
+            }
         </style>
     </head>
     <body>
         <div id="container">
             <video id="videoFeed" autoplay playsinline></video>
             <canvas id="overlay"></canvas>
+            <div id="controls">
+                <div class="control-group">
+                    <input
+                        type="text"
+                        id="leftHandName"
+                        placeholder="Left Hand Symbol Name"
+                    />
+                    <button onclick="saveHandSymbol('Left')">
+                        Save Left Hand Symbol
+                    </button>
+                </div>
+                <div class="control-group">
+                    <input
+                        type="text"
+                        id="rightHandName"
+                        placeholder="Right Hand Symbol Name"
+                    />
+                    <button onclick="saveHandSymbol('Right')">
+                        Save Right Hand Symbol
+                    </button>
+                </div>
+            </div>
         </div>
 
         <script>
@@ -47,6 +80,7 @@
             const smoothingFactor = 0.5; // Adjust this value to control smoothing
             let previousPointerAngle = null; // Initialize previous angle variable
             let previousHandAngle = null; // Initialize previous angle variable
+            let currentHandsData = []; // Store current hands data
 
             function resizeCanvas() {
                 const aspectRatio = 640 / 480;
@@ -198,6 +232,18 @@
                     wrist[0] * scaleX,
                     wrist[1] * scaleY - 10
                 );
+
+                // Draw detected symbols if applicable
+                if (hand.detected_symbols && hand.detected_symbols.length > 0) {
+                    console.log(hand.detected_symbols);
+                    hand.detected_symbols.forEach((symbol, index) => {
+                        ctx.fillText(
+                            `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
+                            wrist[0] * scaleX,
+                            wrist[1] * scaleY + 20 + index * 20
+                        );
+                    });
+                }
             }
 
             // Update the message handler
@@ -207,6 +253,7 @@
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
                 if (data.hands.length > 0) {
+                    currentHandsData = data.hands; // Store current hands data
                     data.hands.forEach((hand) => {
                         drawHand(
                             hand,
@@ -248,6 +295,52 @@
                         sendFrame();
                     };
                 });
+
+            function saveHandSymbol(handedness) {
+                const name = document.getElementById(
+                    handedness === "Left" ? "leftHandName" : "rightHandName"
+                ).value;
+                if (!name) {
+                    alert("Please enter a name for the hand symbol.");
+                    return;
+                }
+
+                // Find the hand data for the specified handedness
+                const handData = currentHandsData.find(
+                    (hand) => hand.handedness === handedness
+                );
+                if (!handData) {
+                    alert(`No ${handedness} hand detected.`);
+                    return;
+                }
+
+                // Send the hand data to the server
+                fetch("/save_handsymbol", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        handedness: handedness,
+                        landmarks: handData.landmarks,
+                    }),
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.status === "success") {
+                            alert(
+                                `${handedness} hand symbol saved successfully.`
+                            );
+                        } else {
+                            alert(`Failed to save ${handedness} hand symbol.`);
+                        }
+                    })
+                    .catch((error) => {
+                        console.error("Error:", error);
+                        alert(`Failed to save ${handedness} hand symbol.`);
+                    });
+            }
         </script>
     </body>
 </html>

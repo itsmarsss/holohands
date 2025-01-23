@@ -1,7 +1,7 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -11,6 +11,7 @@ from eventlet import wsgi
 from eventlet.websocket import WebSocketWSGI
 from io import BytesIO
 from PIL import Image
+from scipy.spatial.distance import cosine
 
 app = Flask(__name__)
 
@@ -23,9 +24,35 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.5
 )
 
+# Store hand symbols
+hand_symbols = []
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/save_handsymbol', methods=['POST'])
+def save_handsymbol():
+    data = request.json
+    name = data['name']
+    handedness = data['handedness']
+    landmarks = data['landmarks']
+
+    # Normalize points in reference to the WRIST position (index 0)
+    wrist = landmarks[0]
+    normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in landmarks]
+
+    # Flatten the normalized points into a 1-D array
+    flattened_landmarks = [coord for lm in normalized_landmarks for coord in lm]
+
+    # Store the normalized points in a 21 dimension vector
+    hand_symbols.append({
+        'name': name,
+        'handedness': handedness,
+        'landmarks': flattened_landmarks
+    })
+
+    return jsonify({'status': 'success'})
 
 @WebSocketWSGI
 def handle_websocket(ws):
@@ -48,10 +75,30 @@ def handle_websocket(ws):
                 for idx, landmarks in enumerate(results.multi_hand_landmarks):
                     handedness = results.multi_handedness[idx].classification[0].label
                     connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
+                    hand_landmarks = [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark]
+
+                    # Normalize points in reference to the WRIST position (index 0)
+                    wrist = hand_landmarks[0]
+                    normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in hand_landmarks]
+
+                    # Flatten the normalized points into a 1-D array
+                    flattened_landmarks = [coord for lm in normalized_landmarks for coord in lm]
+
+                    # Check for matching symbols using cosine similarity
+                    similarities = []
+                    for symbol in hand_symbols:
+                        if symbol['handedness'] == handedness:
+                            similarity = 1 - cosine(flattened_landmarks, symbol['landmarks'])
+                            similarities.append((symbol['name'], similarity))
+
+                    # Sort similarities from highest to least
+                    similarities.sort(key=lambda x: x[1], reverse=True)
+
                     hands_data.append({
                         'handedness': handedness,
-                        'landmarks': [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark],
-                        'connections': connections
+                        'landmarks': hand_landmarks,
+                        'connections': connections,
+                        'detected_symbols': similarities
                     })
 
             # Send hand landmarks data

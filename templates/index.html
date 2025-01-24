@@ -44,6 +44,28 @@
                 pointer-events: none;
                 z-index: 10;
             }
+            .button-column {
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            #left-buttons {
+                left: 10px;
+            }
+            #right-buttons {
+                right: 10px;
+            }
+            .button {
+                padding: 10px 20px;
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            }
         </style>
     </head>
     <body>
@@ -74,6 +96,16 @@
             </div>
             <div id="leftCursor" class="cursor"></div>
             <div id="rightCursor" class="cursor"></div>
+            <div id="left-buttons" class="button-column">
+                <button class="button">Button 1</button>
+                <button class="button">Button 2</button>
+                <button class="button">Button 3</button>
+            </div>
+            <div id="right-buttons" class="button-column">
+                <button class="button">Button 4</button>
+                <button class="button">Button 5</button>
+                <button class="button">Button 6</button>
+            </div>
         </div>
 
         <script>
@@ -201,8 +233,11 @@
                     rightCursor.style.top = `${cursorY - 10 + yOffset}px`;
                 }
 
-                // Print "<Hand> - hold" if distance is less than 50 pixels
-                if (distance < 50) {
+                // Set a threshold distance for detecting a "touch" gesture
+                const touchThreshold = 30; // Adjust this value as needed
+
+                // Print "<Hand> - hold" if distance is less than the threshold
+                if (distance < touchThreshold) {
                     ctx.fillText(
                         `${hand.handedness} - hold`,
                         (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,

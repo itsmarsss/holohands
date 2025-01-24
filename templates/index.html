@@ -66,6 +66,14 @@
                 border-radius: 5px;
                 cursor: pointer;
             }
+            #draggable {
+                position: absolute;
+                width: 100px;
+                height: 100px;
+                background-color: #ff00ff;
+                cursor: grab;
+                z-index: 20;
+            }
         </style>
     </head>
     <body>
@@ -106,6 +114,7 @@
                 <button class="button">Button 5</button>
                 <button class="button">Button 6</button>
             </div>
+            <div id="draggable"></div>
         </div>
 
         <script>
@@ -116,6 +125,7 @@
 
             const leftCursor = document.getElementById("leftCursor");
             const rightCursor = document.getElementById("rightCursor");
+            const draggable = document.getElementById("draggable");
 
             // Colors for different hands
             const handColors = {
@@ -257,19 +267,20 @@
 
                 // Set a dynamic threshold distance for detecting a "touch" gesture
                 const touchThreshold = avgDistance / 3;
-                console.log(touchThreshold);
+
+                console.log(
+                    distanceIndexThumb.toFixed(2),
+                    touchThreshold.toFixed(2)
+                );
 
                 // Print "<Hand> - hold" if both distances are less than the threshold
-                if (
-                    distanceIndexThumb < touchThreshold &&
-                    distanceMiddleThumb < touchThreshold
-                ) {
+                if (distanceIndexThumb < touchThreshold) {
                     ctx.fillText(
                         `${hand.handedness} - hold`,
                         (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,
                         (indexFinger[1] * scaleY + thumb[1] * scaleY) / 2 + 20
                     );
-                    console.log(`${hand.handedness} - hold`);
+                    // console.log(`${hand.handedness} - hold`);
 
                     // Draw on the canvas
                     if (!isDrawing[hand.handedness]) {
@@ -351,23 +362,55 @@
                 ctx.strokeStyle = "#FF0000"; // Red for left hand drawn lines
                 ctx.lineWidth = 2;
                 drawnPoints.Left.forEach((stroke) => {
-                    for (let i = 1; i < stroke.length; i++) {
-                        ctx.beginPath();
-                        ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
-                        ctx.lineTo(stroke[i].x, stroke[i].y);
-                        ctx.stroke();
+                    if (stroke.length < 2) return;
+                    ctx.beginPath();
+                    ctx.moveTo(stroke[0].x, stroke[0].y);
+                    for (let i = 1; i < stroke.length - 1; i++) {
+                        const cp = {
+                            x: (stroke[i].x + stroke[i + 1].x) / 2,
+                            y: (stroke[i].y + stroke[i + 1].y) / 2,
+                        };
+                        ctx.quadraticCurveTo(
+                            stroke[i].x,
+                            stroke[i].y,
+                            cp.x,
+                            cp.y
+                        );
                     }
+                    ctx.quadraticCurveTo(
+                        stroke[stroke.length - 1].x,
+                        stroke[stroke.length - 1].y,
+                        stroke[stroke.length - 1].x,
+                        stroke[stroke.length - 1].y
+                    );
+                    ctx.stroke();
                 });
 
                 ctx.strokeStyle = "#00FF00"; // Green for right hand drawn lines
                 ctx.lineWidth = 2;
                 drawnPoints.Right.forEach((stroke) => {
-                    for (let i = 1; i < stroke.length; i++) {
-                        ctx.beginPath();
-                        ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
-                        ctx.lineTo(stroke[i].x, stroke[i].y);
-                        ctx.stroke();
+                    if (stroke.length < 2) return;
+                    ctx.beginPath();
+                    ctx.moveTo(stroke[0].x, stroke[0].y);
+                    for (let i = 1; i < stroke.length - 1; i++) {
+                        const cp = {
+                            x: (stroke[i].x + stroke[i + 1].x) / 2,
+                            y: (stroke[i].y + stroke[i + 1].y) / 2,
+                        };
+                        ctx.quadraticCurveTo(
+                            stroke[i].x,
+                            stroke[i].y,
+                            cp.x,
+                            cp.y
+                        );
                     }
+                    ctx.quadraticCurveTo(
+                        stroke[stroke.length - 1].x,
+                        stroke[stroke.length - 1].y,
+                        stroke[stroke.length - 1].x,
+                        stroke[stroke.length - 1].y
+                    );
+                    ctx.stroke();
                 });
             }
 

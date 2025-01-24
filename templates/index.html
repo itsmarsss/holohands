@@ -175,12 +175,17 @@
                     ctx.fill();
                 });
 
-                // Draw distance and angle between index finger and thumb
+                // Draw distance and angle between middle finger, index finger, and thumb
+                const middleFinger = hand.landmarks[12];
                 const indexFinger = hand.landmarks[8];
                 const thumb = hand.landmarks[4];
-                const distance = Math.sqrt(
+                const distanceIndexThumb = Math.sqrt(
                     Math.pow((indexFinger[0] - thumb[0]) * scaleX, 2) +
                         Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
+                );
+                const distanceMiddleThumb = Math.sqrt(
+                    Math.pow((middleFinger[0] - thumb[0]) * scaleX, 2) +
+                        Math.pow((middleFinger[1] - thumb[1]) * scaleY, 2)
                 );
 
                 const currentPointerAngle =
@@ -210,7 +215,7 @@
                 ctx.fillStyle = "#0000FF"; // Blue for text
                 ctx.font = "16px Arial";
                 ctx.fillText(
-                    distance.toFixed(2) +
+                    distanceIndexThumb.toFixed(2) +
                         "px, " +
                         -pointerAngle.toFixed(2) +
                         "°",
@@ -233,11 +238,32 @@
                     rightCursor.style.top = `${cursorY - 10 + yOffset}px`;
                 }
 
-                // Set a threshold distance for detecting a "touch" gesture
-                const touchThreshold = 30; // Adjust this value as needed
+                // Find the leftmost, rightmost, topmost, and bottommost points
+                let leftmost = hand.landmarks[0][0];
+                let rightmost = hand.landmarks[0][0];
+                let topmost = hand.landmarks[0][1];
+                let bottommost = hand.landmarks[0][1];
 
-                // Print "<Hand> - hold" if distance is less than the threshold
-                if (distance < touchThreshold) {
+                hand.landmarks.forEach((lm) => {
+                    if (lm[0] < leftmost) leftmost = lm[0];
+                    if (lm[0] > rightmost) rightmost = lm[0];
+                    if (lm[1] < topmost) topmost = lm[1];
+                    if (lm[1] > bottommost) bottommost = lm[1];
+                });
+
+                // Calculate the average distance between these points
+                const avgDistance =
+                    (rightmost - leftmost + bottommost - topmost) / 2;
+
+                // Set a dynamic threshold distance for detecting a "touch" gesture
+                const touchThreshold = avgDistance / 3;
+                console.log(touchThreshold);
+
+                // Print "<Hand> - hold" if both distances are less than the threshold
+                if (
+                    distanceIndexThumb < touchThreshold &&
+                    distanceMiddleThumb < touchThreshold
+                ) {
                     ctx.fillText(
                         `${hand.handedness} - hold`,
                         (indexFinger[0] * scaleX + thumb[0] * scaleX) / 2,

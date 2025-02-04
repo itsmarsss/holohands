@@ -15,6 +15,12 @@ interface ImageSize {
     height: number;
 }
 
+interface Stroke {
+    hand: "Left" | "Right";
+    color: string;
+    points: { x: number; y: number }[];
+}
+
 const WEBSOCKET_URL = "ws://localhost:6969/ws";
 const RECONNECT_DELAY = 3000; // milliseconds
 
@@ -82,9 +88,16 @@ const HandTracking: React.FC = () => {
         width: 0,
         height: 0,
     });
-    const drawnPoints = useRef<
-        { color: string; points: { x: number; y: number }[] }[]
-    >([]);
+
+    // Global strokes array, storing all strokes from either hand in order.
+    const strokes = useRef<Stroke[]>([]);
+    // Keep track of the current (active) stroke for each hand.
+    const currentStroke = useRef<Record<"Left" | "Right", Stroke | null>>({
+        Left: null,
+        Right: null,
+    });
+
+    // Whether each hand is currently drawing.
     const isDrawing = useRef<Record<"Left" | "Right", boolean>>({
         Left: false,
         Right: false,
@@ -107,7 +120,7 @@ const HandTracking: React.FC = () => {
                 imageSize.height
             );
 
-            // Draw hand connections
+            // Draw hand connections.
             ctx.strokeStyle = HAND_COLORS[hand.handedness];
             ctx.lineWidth = 3;
             ctx.globalAlpha = 0.8;
@@ -124,7 +137,7 @@ const HandTracking: React.FC = () => {
                 ctx.stroke();
             });
 
-            // Draw hand landmarks
+            // Draw hand landmarks.
             ctx.fillStyle = HAND_COLORS[hand.handedness];
             ctx.globalAlpha = 1.0;
             hand.landmarks.forEach((lm) => {
@@ -133,7 +146,7 @@ const HandTracking: React.FC = () => {
                 ctx.fill();
             });
 
-            // Draw index-thumb connection
+            // Draw index-thumb connection.
             const indexFinger = hand.landmarks[8];
             const thumb = hand.landmarks[4];
             ctx.strokeStyle = "#FFFFFF";
@@ -143,7 +156,7 @@ const HandTracking: React.FC = () => {
             ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
             ctx.stroke();
 
-            // Compute and display index-thumb distance and holding state
+            // Compute and display index-thumb distance and holding state.
             const distanceIndexThumb = computeDistance(
                 indexFinger,
                 thumb,
@@ -154,7 +167,7 @@ const HandTracking: React.FC = () => {
             distanceHistory.current.push(distanceIndexThumb);
             historyTime.current.push(currentTime);
 
-            // Remove old history entries (> 500ms)
+            // Remove old history entries (> 100ms)
             while (
                 historyTime.current.length > 0 &&
                 currentTime - historyTime.current[0] > 100
@@ -172,7 +185,7 @@ const HandTracking: React.FC = () => {
                 ) / distanceHistory.current.length;
             const stdDev = Math.sqrt(variance);
 
-            // Drawing logic based on hand gesture
+            // Drawing logic based on hand gesture.
             const xValues = hand.landmarks.map((lm) => lm[0]);
             const yValues = hand.landmarks.map((lm) => lm[1]);
             const avgDistance =
@@ -202,7 +215,7 @@ const HandTracking: React.FC = () => {
                 midY + 10
             );
 
-            // Compute and display palm angle
+            // Compute and display palm angle.
             const wrist = hand.landmarks[0];
             const middleFinger = hand.landmarks[12];
             const palmAngle =
@@ -218,7 +231,7 @@ const HandTracking: React.FC = () => {
                 wrist[1] * scaleY - 10
             );
 
-            // Compute and display index-thumb angle
+            // Compute and display index-thumb angle.
             const indexThumbAngle =
                 (Math.atan2(
                     indexFinger[1] - thumb[1],
@@ -232,7 +245,7 @@ const HandTracking: React.FC = () => {
                 indexFinger[1] * scaleY - 30
             );
 
-            // Smooth pointer angle and update cursor position
+            // Smooth pointer angle and update cursor position.
             const currentPointerAngle =
                 (Math.atan2(
                     (indexFinger[1] - thumb[1]) * scaleY,
@@ -253,22 +266,30 @@ const HandTracking: React.FC = () => {
                 overlayCanvas
             );
 
+            // --- Stroke Drawing Logic (for separate strokes in one array) ---
             if (isHolding) {
-                if (!isDrawing.current[hand.handedness]) {
-                    drawnPoints.current.push({
+                // If no active stroke exists for this hand, create one and add it to the global strokes array.
+                if (!currentStroke.current[hand.handedness]) {
+                    currentStroke.current[hand.handedness] = {
+                        hand: hand.handedness,
                         color: HAND_COLORS[hand.handedness],
                         points: [],
-                    });
-                    isDrawing.current[hand.handedness] = true;
+                    };
+                    strokes.current.push(
+                        currentStroke.current[hand.handedness]!
+                    );
                 }
-                const strokes =
-                    drawnPoints.current[drawnPoints.current.length - 1].points;
-                strokes.push({ x: midX, y: midY });
+                // Append the current point to the active stroke.
+                currentStroke.current[hand.handedness]!.points.push({
+                    x: midX,
+                    y: midY,
+                });
             } else {
-                isDrawing.current[hand.handedness] = false;
+                // Finalize the stroke for this hand.
+                currentStroke.current[hand.handedness] = null;
             }
 
-            // Draw detected symbols if available
+            // Draw detected symbols if available.
             if (hand.detected_symbols && hand.detected_symbols.length > 0) {
                 hand.detected_symbols.forEach((symbol, index) => {
                     ctx.fillText(
@@ -283,23 +304,24 @@ const HandTracking: React.FC = () => {
         []
     );
 
+    // Draw each stroke separately from the global strokes array.
     const drawStrokes = useCallback((ctx: CanvasRenderingContext2D) => {
         ctx.save();
         ctx.globalAlpha = 0.8;
-        drawnPoints.current.forEach(({ color, points }) => {
-            ctx.strokeStyle = color;
+        strokes.current.forEach((stroke) => {
+            if (stroke.points.length < 2) return;
+            ctx.strokeStyle = stroke.color;
             ctx.lineWidth = 3;
-            if (points.length < 2) return;
             ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (let i = 1; i < stroke.points.length; i++) {
                 const cp = {
-                    x: (points[i - 1].x + points[i].x) / 2,
-                    y: (points[i - 1].y + points[i].y) / 2,
+                    x: (stroke.points[i - 1].x + stroke.points[i].x) / 2,
+                    y: (stroke.points[i - 1].y + stroke.points[i].y) / 2,
                 };
                 ctx.quadraticCurveTo(
-                    points[i - 1].x,
-                    points[i - 1].y,
+                    stroke.points[i - 1].x,
+                    stroke.points[i - 1].y,
                     cp.x,
                     cp.y
                 );
@@ -342,7 +364,7 @@ const HandTracking: React.FC = () => {
 
                 try {
                     const data = JSON.parse(event.data);
-                    // Clear overlay canvas before drawing new frame
+                    // Clear overlay canvas before drawing new frame.
                     ctx.clearRect(
                         0,
                         0,
@@ -352,10 +374,12 @@ const HandTracking: React.FC = () => {
 
                     if (data.hands && data.hands.length > 0) {
                         setCurrentHandsData(data.hands);
-                        data.hands.forEach((hand: Hand) =>
-                            drawHand(hand, data.image_size as ImageSize, ctx)
-                        );
+                        // Draw each hand.
+                        data.hands.forEach((hand: Hand) => {
+                            drawHand(hand, data.image_size as ImageSize, ctx);
+                        });
                     }
+                    // Draw all stored strokes.
                     drawStrokes(ctx);
 
                     setAcknowledged(false);
@@ -378,7 +402,7 @@ const HandTracking: React.FC = () => {
         const overlayCanvas = overlayCanvasRef.current;
         if (!videoCanvas || !overlayCanvas) return;
 
-        // Use the intrinsic video dimensions to compute the aspect ratio
+        // Use the intrinsic video dimensions to compute the aspect ratio.
         const aspectRatio = videoCanvas.width / videoCanvas.height;
         const windowAspectRatio = window.innerWidth / window.innerHeight;
 
@@ -391,7 +415,7 @@ const HandTracking: React.FC = () => {
             height = window.innerWidth / aspectRatio;
         }
 
-        // Only update if dimensions have changed
+        // Only update if dimensions have changed.
         if (
             previousDimensions.current.width === width &&
             previousDimensions.current.height === height
@@ -405,7 +429,7 @@ const HandTracking: React.FC = () => {
         previousDimensions.current = { width, height };
     }, []);
 
-    // Resize canvases periodically (or consider using a ResizeObserver)
+    // Resize canvases periodically (or consider using a ResizeObserver).
     useEffect(() => {
         const resizeInterval = setInterval(resizeCanvases, 1000);
         return () => clearInterval(resizeInterval);

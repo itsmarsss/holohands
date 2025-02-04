@@ -121,7 +121,7 @@
             const video = document.getElementById("videoFeed");
             const canvas = document.getElementById("overlay");
             const ctx = canvas.getContext("2d");
-            const ws = new WebSocket("ws://" + window.location.host + "/ws");
+            const ws = new WebSocket("ws://localhost:6969/ws");
 
             const leftCursor = document.getElementById("leftCursor");
             const rightCursor = document.getElementById("rightCursor");

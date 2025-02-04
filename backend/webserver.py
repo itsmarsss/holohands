@@ -2,6 +2,7 @@ import eventlet
 eventlet.monkey_patch()
 
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -14,6 +15,7 @@ from PIL import Image
 from scipy.spatial.distance import cosine
 
 app = Flask(__name__)
+CORS(app)
 
 # MediaPipe setup
 mp_hands = mp.solutions.hands
@@ -135,4 +137,4 @@ def combined_app(environ, start_response):
     return app(environ, start_response)
 
 if __name__ == '__main__':
-    wsgi.server(eventlet.listen(('0.0.0.0', 6969)), combined_app)
+    wsgi.server(eventlet.listen(('0.0.0.0', 6969), reuse_port=True), combined_app)

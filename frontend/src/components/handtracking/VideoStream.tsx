@@ -1,17 +1,42 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 interface VideoStreamProps {
     canvasRef: React.RefObject<HTMLCanvasElement>;
     wsRef: React.RefObject<WebSocket | null>;
+    acknowledged: boolean;
+    onAcknowledge: () => void;
 }
 
-const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
+const VideoStream: React.FC<VideoStreamProps> = ({
+    canvasRef,
+    wsRef,
+    acknowledged,
+    onAcknowledge,
+}) => {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const animationFrameRef = useRef<number>();
     const previousDimensions = useRef<{ width: number; height: number }>({
         width: 0,
         height: 0,
     });
+    const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
+        null
+    );
+
+    useEffect(() => {
+        const getVideoDevices = async () => {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devices.filter(
+                (device) => device.kind === "videoinput"
+            );
+            setVideoDevices(videoInputs);
+            if (videoInputs.length > 0) {
+                setSelectedDeviceId(videoInputs[0].deviceId); // Select the first camera by default
+            }
+        };
+        getVideoDevices();
+    }, []);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -75,45 +100,66 @@ const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
             animationFrameRef.current = requestAnimationFrame(drawVideoFrame);
         };
 
-        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                video.play();
-                resizeCanvas(); // Resize canvas when video is loaded
-                drawVideoFrame();
+        const startVideoStream = async () => {
+            if (selectedDeviceId) {
+                // Stop previous stream if it exists
+                if (video.srcObject) {
+                    const tracks = (video.srcObject as MediaStream).getTracks();
+                    tracks.forEach((track) => track.stop());
+                }
 
-                const sendFrame = () => {
-                    if (
-                        !video ||
-                        !wsRef.current ||
-                        wsRef.current.readyState !== WebSocket.OPEN
-                    )
-                        return;
+                await navigator.mediaDevices
+                    .getUserMedia({
+                        video: { deviceId: { exact: selectedDeviceId } },
+                    })
+                    .then((stream) => {
+                        video.srcObject = stream;
+                        video.onloadedmetadata = () => {
+                            video.play();
+                            resizeCanvas(); // Resize canvas when video is loaded
+                            drawVideoFrame();
 
-                    const offscreenCanvas = document.createElement("canvas");
-                    const scaleFactor = 0.5; // Scale down for performance
-                    offscreenCanvas.width = video.videoWidth * scaleFactor;
-                    offscreenCanvas.height = video.videoHeight * scaleFactor;
-                    const offscreenCtx = offscreenCanvas.getContext("2d");
+                            const sendFrame = async () => {
+                                if (acknowledged) return;
 
-                    if (offscreenCtx) {
-                        offscreenCtx.scale(-1, 1);
-                        offscreenCtx.drawImage(
-                            video,
-                            -offscreenCanvas.width,
-                            0,
-                            offscreenCanvas.width,
-                            offscreenCanvas.height
-                        );
-                        wsRef.current.send(
-                            offscreenCanvas.toDataURL("image/webp", 1)
-                        );
-                    }
-                    setTimeout(sendFrame, 33);
-                };
-                sendFrame();
-            };
-        });
+                                const offscreenCanvas =
+                                    document.createElement("canvas");
+                                const scaleFactor = 0.5; // Scale down for performance
+                                offscreenCanvas.width =
+                                    video.videoWidth * scaleFactor;
+                                offscreenCanvas.height =
+                                    video.videoHeight * scaleFactor;
+                                const offscreenCtx =
+                                    offscreenCanvas.getContext("2d");
+
+                                if (offscreenCtx) {
+                                    offscreenCtx.scale(-1, 1);
+                                    offscreenCtx.drawImage(
+                                        video,
+                                        -offscreenCanvas.width,
+                                        0,
+                                        offscreenCanvas.width,
+                                        offscreenCanvas.height
+                                    );
+                                    wsRef.current!.send(
+                                        offscreenCanvas.toDataURL(
+                                            "image/webp",
+                                            1
+                                        )
+                                    );
+                                }
+
+                                onAcknowledge();
+
+                                setTimeout(sendFrame, 33);
+                            };
+                            sendFrame();
+                        };
+                    });
+            }
+        };
+
+        startVideoStream();
 
         // Set interval to resize canvas every second
         const resizeInterval = setInterval(resizeCanvas, 1000);
@@ -126,17 +172,35 @@ const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
             tracks?.getTracks().forEach((track) => track.stop());
             clearInterval(resizeInterval); // Clear the interval on unmount
         };
-    }, [canvasRef, wsRef]);
+    }, [canvasRef, wsRef, selectedDeviceId]);
+
+    const handleDeviceChange = (
+        event: React.ChangeEvent<HTMLSelectElement>
+    ) => {
+        setSelectedDeviceId(event.target.value);
+    };
 
     return (
-        <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            style={{
-                display: "none", // Hide the video element
-            }}
-        />
+        <div className="dropdown-container">
+            <select
+                onChange={handleDeviceChange}
+                value={selectedDeviceId || ""}
+            >
+                {videoDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `Camera ${device.deviceId}`}
+                    </option>
+                ))}
+            </select>
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                style={{
+                    display: "none", // Hide the video element
+                }}
+            />
+        </div>
     );
 };
 

@@ -110,3 +110,11 @@ canvas {
     max-width: 100%; /* Ensures it doesn't exceed the container */
     height: auto; /* Maintains aspect ratio */
 }
+
+.dropdown-container {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+}

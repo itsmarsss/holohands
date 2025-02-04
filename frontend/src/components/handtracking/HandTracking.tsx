@@ -92,6 +92,7 @@ const HandTracking: React.FC = () => {
     const distanceHistory = useRef<number[]>([]);
     const historyTime = useRef<number[]>([]);
     const smoothingFactor = 0.5;
+    const [acknowledged, setAcknowledged] = useState(false);
 
     const drawHand = useCallback(
         (hand: Hand, imageSize: ImageSize, ctx: CanvasRenderingContext2D) => {
@@ -356,6 +357,8 @@ const HandTracking: React.FC = () => {
                         );
                     }
                     drawStrokes(ctx);
+
+                    setAcknowledged(false);
                 } catch (error) {
                     console.error("Error processing message:", error);
                 }
@@ -422,9 +425,18 @@ const HandTracking: React.FC = () => {
         };
     }, [connectWebSocket]);
 
+    const handleAcknowledgment = () => {
+        setAcknowledged(true);
+    };
+
     return (
         <div id="container">
-            <VideoStream canvasRef={videoCanvasRef} wsRef={ws} />
+            <VideoStream
+                canvasRef={videoCanvasRef}
+                wsRef={ws}
+                acknowledged={acknowledged}
+                onAcknowledge={handleAcknowledgment}
+            />
             <Controls currentHandsData={currentHandsData} />
             <canvas ref={videoCanvasRef} />
             <canvas

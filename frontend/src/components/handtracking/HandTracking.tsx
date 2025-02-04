@@ -157,7 +157,7 @@ const HandTracking: React.FC = () => {
             // Remove old history entries (> 500ms)
             while (
                 historyTime.current.length > 0 &&
-                currentTime - historyTime.current[0] > 500
+                currentTime - historyTime.current[0] > 100
             ) {
                 distanceHistory.current.shift();
                 historyTime.current.shift();
@@ -171,11 +171,21 @@ const HandTracking: React.FC = () => {
                     0
                 ) / distanceHistory.current.length;
             const stdDev = Math.sqrt(variance);
-            const holdingThreshold = 75;
+
+            // Drawing logic based on hand gesture
+            const xValues = hand.landmarks.map((lm) => lm[0]);
+            const yValues = hand.landmarks.map((lm) => lm[1]);
+            const avgDistance =
+                (Math.max(...xValues) -
+                    Math.min(...xValues) +
+                    (Math.max(...yValues) - Math.min(...yValues))) /
+                2;
+            const touchThreshold = avgDistance / 3;
+
             const stabilityThreshold = 10;
             const isHolding =
                 stdDev < stabilityThreshold &&
-                distanceIndexThumb < holdingThreshold;
+                distanceIndexThumb < touchThreshold;
 
             const midX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
             const midY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
@@ -243,17 +253,7 @@ const HandTracking: React.FC = () => {
                 overlayCanvas
             );
 
-            // Drawing logic based on hand gesture
-            const xValues = hand.landmarks.map((lm) => lm[0]);
-            const yValues = hand.landmarks.map((lm) => lm[1]);
-            const avgDistance =
-                (Math.max(...xValues) -
-                    Math.min(...xValues) +
-                    (Math.max(...yValues) - Math.min(...yValues))) /
-                2;
-            const touchThreshold = avgDistance / 3;
-
-            if (distanceIndexThumb < touchThreshold) {
+            if (isHolding) {
                 if (!isDrawing.current[hand.handedness]) {
                     drawnPoints.current.push({
                         color: HAND_COLORS[hand.handedness],

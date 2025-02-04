@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import CameraSelect from "./CameraSelect";
 
 interface VideoStreamProps {
     canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -147,6 +148,7 @@ const VideoStream: React.FC<VideoStreamProps> = ({
                                             1
                                         )
                                     );
+                                    console.log("Frame sent.");
                                 }
 
                                 onAcknowledge();
@@ -174,24 +176,13 @@ const VideoStream: React.FC<VideoStreamProps> = ({
         };
     }, [canvasRef, wsRef, selectedDeviceId]);
 
-    const handleDeviceChange = (
-        event: React.ChangeEvent<HTMLSelectElement>
-    ) => {
-        setSelectedDeviceId(event.target.value);
-    };
-
     return (
         <div className="dropdown-container">
-            <select
-                onChange={handleDeviceChange}
-                value={selectedDeviceId || ""}
-            >
-                {videoDevices.map((device) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                        {device.label || `Camera ${device.deviceId}`}
-                    </option>
-                ))}
-            </select>
+            <CameraSelect
+                selectedDeviceId={selectedDeviceId}
+                setSelectedDeviceId={setSelectedDeviceId}
+                videoDevices={videoDevices}
+            />
             <video
                 ref={videoRef}
                 autoPlay

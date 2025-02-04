@@ -4,254 +4,309 @@ import Controls from "./Controls";
 import "./HandTracking.css";
 
 interface Hand {
-    handedness: string;
+    handedness: "Left" | "Right";
     landmarks: number[][];
     connections: number[][];
     detected_symbols?: [string, number][];
 }
 
+interface ImageSize {
+    width: number;
+    height: number;
+}
+
 const WEBSOCKET_URL = "ws://localhost:6969/ws";
-const RECONNECT_DELAY = 3000; // 3 seconds
+const RECONNECT_DELAY = 3000; // milliseconds
+
+const HAND_COLORS: Record<"Left" | "Right", string> = {
+    Left: "#FF0000", // Red
+    Right: "#00FF00", // Green
+};
+
+const getScaleFactors = (
+    canvasWidth: number,
+    canvasHeight: number,
+    imageWidth: number,
+    imageHeight: number
+) => ({
+    scaleX: canvasWidth / imageWidth,
+    scaleY: canvasHeight / imageHeight,
+});
+
+const computeDistance = (
+    p1: number[],
+    p2: number[],
+    scaleX: number,
+    scaleY: number
+) =>
+    Math.sqrt(
+        Math.pow((p1[0] - p2[0]) * scaleX, 2) +
+            Math.pow((p1[1] - p2[1]) * scaleY, 2)
+    );
+
+const updateCursorPosition = (
+    elementId: string,
+    x: number,
+    y: number,
+    canvas: HTMLCanvasElement
+) => {
+    const cursor = document.getElementById(elementId);
+    if (!cursor) return;
+    const { left: xOffset, top: yOffset } = canvas.getBoundingClientRect();
+    cursor.style.left = `${x - 10 + xOffset}px`;
+    cursor.style.top = `${y - 10 + yOffset}px`;
+};
+
+const smoothValue = (
+    previous: number | null,
+    current: number,
+    smoothingFactor: number
+): number => {
+    if (previous === null) return current;
+    return previous * (1 - smoothingFactor) + current * smoothingFactor;
+};
 
 const HandTracking: React.FC = () => {
     const videoCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const ws = useRef<WebSocket | null>(null);
+    const reconnectTimeout = useRef<number>();
+
     const [currentHandsData, setCurrentHandsData] = useState<Hand[]>([]);
-    const previousPointerAngle = useRef<number | null>(null);
-    const previousHandAngle = useRef<number | null>(null);
-    const drawnPoints = useRef<{ [key: string]: { x: number; y: number }[][] }>(
-        {
-            Left: [],
-            Right: [],
-        }
-    );
-    const isDrawing = useRef<{ [key: string]: boolean }>({
-        Left: false,
-        Right: false,
-    });
     const [connectionStatus, setConnectionStatus] = useState<
         "connecting" | "connected" | "disconnected"
     >("disconnected");
-    const reconnectTimeout = useRef<number>();
 
-    const handColors = {
-        Left: "#FF0000", // Red
-        Right: "#00FF00", // Green
-    };
-
+    const previousPointerAngle = useRef<number | null>(null);
     const previousDimensions = useRef<{ width: number; height: number }>({
         width: 0,
         height: 0,
     });
-
+    const drawnPoints = useRef<
+        { color: string; points: { x: number; y: number }[] }[]
+    >([]);
+    const isDrawing = useRef<Record<"Left" | "Right", boolean>>({
+        Left: false,
+        Right: false,
+    });
+    const distanceHistory = useRef<number[]>([]);
+    const historyTime = useRef<number[]>([]);
     const smoothingFactor = 0.5;
 
-    const drawHand = (
-        hand: Hand,
-        imgWidth: number,
-        imgHeight: number,
-        ctx: CanvasRenderingContext2D
-    ) => {
-        const canvas = overlayCanvasRef.current;
-        if (!canvas) return;
+    const drawHand = useCallback(
+        (hand: Hand, imageSize: ImageSize, ctx: CanvasRenderingContext2D) => {
+            const overlayCanvas = overlayCanvasRef.current;
+            if (!overlayCanvas) return;
 
-        ctx.save();
-
-        // Scale coordinates to video feed size
-        const scaleX = canvas.width / imgWidth;
-        const scaleY = canvas.height / imgHeight;
-
-        // Draw connections with thicker lines and semi-transparency
-        ctx.strokeStyle =
-            handColors[hand.handedness as keyof typeof handColors];
-        ctx.lineWidth = 3;
-        ctx.globalAlpha = 0.8;
-
-        hand.connections.forEach(([start, end]) => {
-            const startX = hand.landmarks[start][0] * scaleX;
-            const startY = hand.landmarks[start][1] * scaleY;
-            const endX = hand.landmarks[end][0] * scaleX;
-            const endY = hand.landmarks[end][1] * scaleY;
-
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
-            ctx.stroke();
-        });
-
-        // Draw landmarks with larger radius
-        ctx.fillStyle = handColors[hand.handedness as keyof typeof handColors];
-        ctx.globalAlpha = 1.0;
-        hand.landmarks.forEach((lm) => {
-            ctx.beginPath();
-            ctx.arc(lm[0] * scaleX, lm[1] * scaleY, 4, 0, 2 * Math.PI);
-            ctx.fill();
-        });
-
-        // Draw index-thumb finger line
-        const indexFinger = hand.landmarks[8];
-        const thumb = hand.landmarks[4];
-        ctx.strokeStyle = "#FFFFFF";
-        ctx.lineWidth = 2;
-        ctx.globalAlpha = 1.0;
-        ctx.beginPath();
-        ctx.moveTo(indexFinger[0] * scaleX, indexFinger[1] * scaleY);
-        ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
-        ctx.stroke();
-
-        // Calculate the distance between the index finger and thumb
-        let distanceIndexThumb = Math.sqrt(
-            Math.pow((indexFinger[0] - thumb[0]) * scaleX, 2) +
-                Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
-        );
-
-        // Define a threshold for holding
-        const holdingThreshold = 50; // Adjust this value as needed
-
-        // Check if fingers are considered holding
-        const isHolding = distanceIndexThumb < holdingThreshold;
-
-        // Draw the distance on the canvas
-        ctx.fillStyle = "#FFFFFF"; // White color for the distance text
-        ctx.font = "16px Arial";
-        ctx.fillText(
-            `Distance: ${distanceIndexThumb.toFixed(2)} px`,
-            ((indexFinger[0] + thumb[0]) / 2) * scaleX,
-            ((indexFinger[1] + thumb[1]) / 2) * scaleY - 10
-        );
-
-        // Indicate holding state
-        if (isHolding) {
-            ctx.fillText(
-                "Holding",
-                ((indexFinger[0] + thumb[0]) / 2) * scaleX,
-                ((indexFinger[1] + thumb[1]) / 2) * scaleY + 10
+            ctx.save();
+            const { scaleX, scaleY } = getScaleFactors(
+                overlayCanvas.width,
+                overlayCanvas.height,
+                imageSize.width,
+                imageSize.height
             );
-        }
 
-        // Calculate the angle between the wrist and the line connecting index and middle fingers
-        const wrist = hand.landmarks[0];
-        const middleFinger = hand.landmarks[12];
-
-        const palmAngle =
-            Math.atan2(middleFinger[1] - wrist[1], middleFinger[0] - wrist[0]) *
-            (180 / Math.PI); // Convert to degrees
-
-        // Draw the palm angle on the canvas
-        ctx.fillStyle = "#FFFFFF"; // White color for the angle text
-        ctx.font = "16px Arial";
-        ctx.fillText(
-            `Palm Angle: ${palmAngle.toFixed(2)}°`,
-            wrist[0] * scaleX,
-            wrist[1] * scaleY - 10
-        );
-
-        // Calculate the angle between the index finger and thumb
-        const indexThumbAngle =
-            Math.atan2(indexFinger[1] - thumb[1], indexFinger[0] - thumb[0]) *
-            (180 / Math.PI); // Convert to degrees
-
-        // Draw the index-thumb angle on the canvas
-        ctx.fillText(
-            `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
-            indexFinger[0] * scaleX,
-            indexFinger[1] * scaleY - 30
-        );
-
-        const currentPointerAngle =
-            Math.atan2(
-                (indexFinger[1] - thumb[1]) * scaleY,
-                (indexFinger[0] - thumb[0]) * scaleX
-            ) *
-            (180 / Math.PI);
-
-        // Smooth the angle
-        const pointerAngle =
-            previousPointerAngle.current === null
-                ? currentPointerAngle
-                : previousPointerAngle.current * (1 - smoothingFactor) +
-                  currentPointerAngle * smoothingFactor;
-
-        previousPointerAngle.current = pointerAngle;
-
-        // Draw cursor position
-        const cursorX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
-        const cursorY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
-
-        const xOffset = canvas.getBoundingClientRect().left;
-        const yOffset = canvas.getBoundingClientRect().top;
-
-        // Update cursor elements
-        const cursor = document.getElementById(
-            `${hand.handedness.toLowerCase()}Cursor`
-        );
-        if (cursor) {
-            cursor.style.left = `${cursorX - 10 + xOffset}px`;
-            cursor.style.top = `${cursorY - 10 + yOffset}px`;
-        }
-
-        // Handle drawing
-        const leftmost = Math.min(...hand.landmarks.map((lm) => lm[0]));
-        const rightmost = Math.max(...hand.landmarks.map((lm) => lm[0]));
-        const topmost = Math.min(...hand.landmarks.map((lm) => lm[1]));
-        const bottommost = Math.max(...hand.landmarks.map((lm) => lm[1]));
-
-        const avgDistance = (rightmost - leftmost + bottommost - topmost) / 2;
-        const touchThreshold = avgDistance / 3;
-
-        if (distanceIndexThumb < touchThreshold) {
-            if (!isDrawing.current[hand.handedness]) {
-                drawnPoints.current[hand.handedness].push([]);
-                isDrawing.current[hand.handedness] = true;
-            }
-            drawnPoints.current[hand.handedness][
-                drawnPoints.current[hand.handedness].length - 1
-            ].push({ x: cursorX, y: cursorY });
-        } else {
-            isDrawing.current[hand.handedness] = false;
-        }
-
-        // Draw detected symbols
-        if (hand.detected_symbols && hand.detected_symbols.length > 0) {
-            ctx.fillStyle = "#FFFFFF";
-            ctx.font = "16px Arial";
-            hand.detected_symbols.forEach((symbol, index) => {
-                ctx.fillText(
-                    `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
-                    hand.landmarks[0][0] * scaleX,
-                    hand.landmarks[0][1] * scaleY + 20 + index * 20
-                );
-            });
-        }
-
-        ctx.restore();
-    };
-
-    const drawPoints = (ctx: CanvasRenderingContext2D) => {
-        ctx.save();
-        ctx.globalAlpha = 0.8;
-
-        Object.entries(drawnPoints.current).forEach(([handedness, strokes]) => {
-            ctx.strokeStyle = handColors[handedness as keyof typeof handColors];
+            // Draw hand connections
+            ctx.strokeStyle = HAND_COLORS[hand.handedness];
             ctx.lineWidth = 3;
-            strokes.forEach((stroke) => {
-                if (stroke.length < 2) return;
+            ctx.globalAlpha = 0.8;
+            hand.connections.forEach(([start, end]) => {
                 ctx.beginPath();
-                ctx.moveTo(stroke[0].x, stroke[0].y);
-                for (let i = 1; i < stroke.length - 1; i++) {
-                    const cp = {
-                        x: (stroke[i].x + stroke[i + 1].x) / 2,
-                        y: (stroke[i].y + stroke[i + 1].y) / 2,
-                    };
-                    ctx.quadraticCurveTo(stroke[i].x, stroke[i].y, cp.x, cp.y);
-                }
+                ctx.moveTo(
+                    hand.landmarks[start][0] * scaleX,
+                    hand.landmarks[start][1] * scaleY
+                );
+                ctx.lineTo(
+                    hand.landmarks[end][0] * scaleX,
+                    hand.landmarks[end][1] * scaleY
+                );
                 ctx.stroke();
             });
-        });
 
+            // Draw hand landmarks
+            ctx.fillStyle = HAND_COLORS[hand.handedness];
+            ctx.globalAlpha = 1.0;
+            hand.landmarks.forEach((lm) => {
+                ctx.beginPath();
+                ctx.arc(lm[0] * scaleX, lm[1] * scaleY, 4, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Draw index-thumb connection
+            const indexFinger = hand.landmarks[8];
+            const thumb = hand.landmarks[4];
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(indexFinger[0] * scaleX, indexFinger[1] * scaleY);
+            ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
+            ctx.stroke();
+
+            // Compute and display index-thumb distance and holding state
+            const distanceIndexThumb = computeDistance(
+                indexFinger,
+                thumb,
+                scaleX,
+                scaleY
+            );
+            const currentTime = Date.now();
+            distanceHistory.current.push(distanceIndexThumb);
+            historyTime.current.push(currentTime);
+
+            // Remove old history entries (> 500ms)
+            while (
+                historyTime.current.length > 0 &&
+                currentTime - historyTime.current[0] > 500
+            ) {
+                distanceHistory.current.shift();
+                historyTime.current.shift();
+            }
+            const movingAverage =
+                distanceHistory.current.reduce((sum, val) => sum + val, 0) /
+                distanceHistory.current.length;
+            const variance =
+                distanceHistory.current.reduce(
+                    (sum, val) => sum + Math.pow(val - movingAverage, 2),
+                    0
+                ) / distanceHistory.current.length;
+            const stdDev = Math.sqrt(variance);
+            const holdingThreshold = 75;
+            const stabilityThreshold = 10;
+            const isHolding =
+                stdDev < stabilityThreshold &&
+                distanceIndexThumb < holdingThreshold;
+
+            const midX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+            const midY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "16px Arial";
+            ctx.fillText(
+                `Distance: ${distanceIndexThumb.toFixed(2)} px`,
+                midX,
+                midY - 10
+            );
+            ctx.fillText(
+                isHolding ? "Holding" : "Not Holding",
+                midX,
+                midY + 10
+            );
+
+            // Compute and display palm angle
+            const wrist = hand.landmarks[0];
+            const middleFinger = hand.landmarks[12];
+            const palmAngle =
+                (Math.atan2(
+                    middleFinger[1] - wrist[1],
+                    middleFinger[0] - wrist[0]
+                ) *
+                    180) /
+                Math.PI;
+            ctx.fillText(
+                `Palm Angle: ${palmAngle.toFixed(2)}°`,
+                wrist[0] * scaleX,
+                wrist[1] * scaleY - 10
+            );
+
+            // Compute and display index-thumb angle
+            const indexThumbAngle =
+                (Math.atan2(
+                    indexFinger[1] - thumb[1],
+                    indexFinger[0] - thumb[0]
+                ) *
+                    180) /
+                Math.PI;
+            ctx.fillText(
+                `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
+                indexFinger[0] * scaleX,
+                indexFinger[1] * scaleY - 30
+            );
+
+            // Smooth pointer angle and update cursor position
+            const currentPointerAngle =
+                (Math.atan2(
+                    (indexFinger[1] - thumb[1]) * scaleY,
+                    (indexFinger[0] - thumb[0]) * scaleX
+                ) *
+                    180) /
+                Math.PI;
+            const pointerAngle = smoothValue(
+                previousPointerAngle.current,
+                currentPointerAngle,
+                smoothingFactor
+            );
+            previousPointerAngle.current = pointerAngle;
+            updateCursorPosition(
+                `${hand.handedness.toLowerCase()}Cursor`,
+                midX,
+                midY,
+                overlayCanvas
+            );
+
+            // Drawing logic based on hand gesture
+            const xValues = hand.landmarks.map((lm) => lm[0]);
+            const yValues = hand.landmarks.map((lm) => lm[1]);
+            const avgDistance =
+                (Math.max(...xValues) -
+                    Math.min(...xValues) +
+                    (Math.max(...yValues) - Math.min(...yValues))) /
+                2;
+            const touchThreshold = avgDistance / 3;
+
+            if (distanceIndexThumb < touchThreshold) {
+                if (!isDrawing.current[hand.handedness]) {
+                    drawnPoints.current.push({
+                        color: HAND_COLORS[hand.handedness],
+                        points: [],
+                    });
+                    isDrawing.current[hand.handedness] = true;
+                }
+                const strokes =
+                    drawnPoints.current[drawnPoints.current.length - 1].points;
+                strokes.push({ x: midX, y: midY });
+            } else {
+                isDrawing.current[hand.handedness] = false;
+            }
+
+            // Draw detected symbols if available
+            if (hand.detected_symbols && hand.detected_symbols.length > 0) {
+                hand.detected_symbols.forEach((symbol, index) => {
+                    ctx.fillText(
+                        `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
+                        wrist[0] * scaleX,
+                        wrist[1] * scaleY + 20 + index * 20
+                    );
+                });
+            }
+            ctx.restore();
+        },
+        []
+    );
+
+    const drawStrokes = useCallback((ctx: CanvasRenderingContext2D) => {
+        ctx.save();
+        ctx.globalAlpha = 0.8;
+        drawnPoints.current.forEach(({ color, points }) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            if (points.length < 2) return;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                const cp = {
+                    x: (points[i - 1].x + points[i].x) / 2,
+                    y: (points[i - 1].y + points[i].y) / 2,
+                };
+                ctx.quadraticCurveTo(
+                    points[i - 1].x,
+                    points[i - 1].y,
+                    cp.x,
+                    cp.y
+                );
+            }
+            ctx.stroke();
+        });
         ctx.restore();
-    };
+    }, []);
 
     const connectWebSocket = useCallback(() => {
         if (ws.current?.readyState === WebSocket.OPEN) return;
@@ -280,13 +335,13 @@ const HandTracking: React.FC = () => {
 
             ws.current.onmessage = (event) => {
                 const overlayCanvas = overlayCanvasRef.current;
-                const ctx = overlayCanvas?.getContext("2d");
-                if (!ctx || !overlayCanvas) return;
+                if (!overlayCanvas) return;
+                const ctx = overlayCanvas.getContext("2d");
+                if (!ctx) return;
 
                 try {
                     const data = JSON.parse(event.data);
-
-                    // Clear the overlay canvas
+                    // Clear overlay canvas before drawing new frame
                     ctx.clearRect(
                         0,
                         0,
@@ -296,17 +351,11 @@ const HandTracking: React.FC = () => {
 
                     if (data.hands && data.hands.length > 0) {
                         setCurrentHandsData(data.hands);
-                        data.hands.forEach((hand: Hand) => {
-                            drawHand(
-                                hand,
-                                data.image_size.width,
-                                data.image_size.height,
-                                ctx
-                            );
-                        });
+                        data.hands.forEach((hand: Hand) =>
+                            drawHand(hand, data.image_size as ImageSize, ctx)
+                        );
                     }
-
-                    drawPoints(ctx);
+                    drawStrokes(ctx);
                 } catch (error) {
                     console.error("Error processing message:", error);
                 }
@@ -319,63 +368,47 @@ const HandTracking: React.FC = () => {
                 RECONNECT_DELAY
             );
         }
-    }, []);
+    }, [drawHand, drawStrokes]);
 
-    const resizeCanvases = () => {
-        const video = videoCanvasRef.current;
-        if (!video) return;
-
-        const aspectRatio = video.width / video.height; // Get the aspect ratio from the video feed
-        const windowAspectRatio = window.innerWidth / window.innerHeight;
-
-        let width, height;
-        if (windowAspectRatio > aspectRatio) {
-            // Window is wider than the video aspect ratio
-            width = window.innerHeight * aspectRatio;
-            height = window.innerHeight;
-        } else {
-            // Window is taller than the video aspect ratio
-            width = window.innerWidth;
-            height = window.innerWidth / aspectRatio;
-        }
-
-        if (
-            previousDimensions.current.width == width ||
-            previousDimensions.current.height == height
-        ) {
-            return;
-        }
-
-        // Set both canvases to the same size
-        if (videoCanvasRef.current && overlayCanvasRef.current) {
-            videoCanvasRef.current.width = width;
-            videoCanvasRef.current.height = height;
-            overlayCanvasRef.current.width = width;
-            overlayCanvasRef.current.height = height;
-
-            // Update previous dimensions
-            previousDimensions.current.width = width;
-            previousDimensions.current.height = height;
-        }
-    };
-
-    useEffect(() => {
-        const resizeInterval = setInterval(resizeCanvases, 1000); // Resize canvases every second
-
-        return () => {
-            clearInterval(resizeInterval); // Clear the interval on unmount
-        };
-    }, []);
-
-    useEffect(() => {
+    const resizeCanvases = useCallback(() => {
         const videoCanvas = videoCanvasRef.current;
         const overlayCanvas = overlayCanvasRef.current;
         if (!videoCanvas || !overlayCanvas) return;
 
-        const videoCtx = videoCanvas.getContext("2d");
-        const overlayCtx = overlayCanvas.getContext("2d");
-        if (!videoCtx || !overlayCtx) return;
+        // Use the intrinsic video dimensions to compute the aspect ratio
+        const aspectRatio = videoCanvas.width / videoCanvas.height;
+        const windowAspectRatio = window.innerWidth / window.innerHeight;
 
+        let width: number, height: number;
+        if (windowAspectRatio > aspectRatio) {
+            width = window.innerHeight * aspectRatio;
+            height = window.innerHeight;
+        } else {
+            width = window.innerWidth;
+            height = window.innerWidth / aspectRatio;
+        }
+
+        // Only update if dimensions have changed
+        if (
+            previousDimensions.current.width === width &&
+            previousDimensions.current.height === height
+        )
+            return;
+
+        videoCanvas.width = width;
+        videoCanvas.height = height;
+        overlayCanvas.width = width;
+        overlayCanvas.height = height;
+        previousDimensions.current = { width, height };
+    }, []);
+
+    // Resize canvases periodically (or consider using a ResizeObserver)
+    useEffect(() => {
+        const resizeInterval = setInterval(resizeCanvases, 1000);
+        return () => clearInterval(resizeInterval);
+    }, [resizeCanvases]);
+
+    useEffect(() => {
         setConnectionStatus("connecting");
         connectWebSocket();
 

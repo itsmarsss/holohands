@@ -40,6 +40,11 @@ const HandTracking: React.FC = () => {
         Right: "#00FF00", // Green
     };
 
+    const previousDimensions = useRef<{ width: number; height: number }>({
+        width: 0,
+        height: 0,
+    });
+
     const smoothingFactor = 0.5;
 
     const drawHand = (
@@ -95,6 +100,36 @@ const HandTracking: React.FC = () => {
         ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
         ctx.stroke();
 
+        // Calculate the distance between the index finger and thumb
+        let distanceIndexThumb = Math.sqrt(
+            Math.pow((indexFinger[0] - thumb[0]) * scaleX, 2) +
+                Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
+        );
+
+        // Define a threshold for holding
+        const holdingThreshold = 50; // Adjust this value as needed
+
+        // Check if fingers are considered holding
+        const isHolding = distanceIndexThumb < holdingThreshold;
+
+        // Draw the distance on the canvas
+        ctx.fillStyle = "#FFFFFF"; // White color for the distance text
+        ctx.font = "16px Arial";
+        ctx.fillText(
+            `Distance: ${distanceIndexThumb.toFixed(2)} px`,
+            ((indexFinger[0] + thumb[0]) / 2) * scaleX,
+            ((indexFinger[1] + thumb[1]) / 2) * scaleY - 10
+        );
+
+        // Indicate holding state
+        if (isHolding) {
+            ctx.fillText(
+                "Holding",
+                ((indexFinger[0] + thumb[0]) / 2) * scaleX,
+                ((indexFinger[1] + thumb[1]) / 2) * scaleY + 10
+            );
+        }
+
         // Calculate the angle between the wrist and the line connecting index and middle fingers
         const wrist = hand.landmarks[0];
         const middleFinger = hand.landmarks[12];
@@ -122,12 +157,6 @@ const HandTracking: React.FC = () => {
             `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
             indexFinger[0] * scaleX,
             indexFinger[1] * scaleY - 30
-        );
-
-        // Calculate distances and angles
-        const distanceIndexThumb = Math.sqrt(
-            Math.pow((indexFinger[0] - thumb[0]) * scaleX, 2) +
-                Math.pow((indexFinger[1] - thumb[1]) * scaleY, 2)
         );
 
         const currentPointerAngle =
@@ -296,9 +325,7 @@ const HandTracking: React.FC = () => {
         const video = videoCanvasRef.current;
         if (!video) return;
 
-        // Get the aspect ratio from the video feed
-        const aspectRatio = video.width / video.height;
-        console.log(video.width, video.height);
+        const aspectRatio = video.width / video.height; // Get the aspect ratio from the video feed
         const windowAspectRatio = window.innerWidth / window.innerHeight;
 
         let width, height;
@@ -312,32 +339,33 @@ const HandTracking: React.FC = () => {
             height = window.innerWidth / aspectRatio;
         }
 
+        if (
+            previousDimensions.current.width == width ||
+            previousDimensions.current.height == height
+        ) {
+            return;
+        }
+
         // Set both canvases to the same size
         if (videoCanvasRef.current && overlayCanvasRef.current) {
             videoCanvasRef.current.width = width;
             videoCanvasRef.current.height = height;
             overlayCanvasRef.current.width = width;
             overlayCanvasRef.current.height = height;
-        }
 
-        // Apply styles
-        const canvasStyle = {
-            width: width + "px",
-            height: height + "px",
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-        };
-
-        if (videoCanvasRef.current && overlayCanvasRef.current) {
-            Object.assign(videoCanvasRef.current.style, canvasStyle);
-            Object.assign(overlayCanvasRef.current.style, {
-                ...canvasStyle,
-                backgroundColor: "transparent",
-            });
+            // Update previous dimensions
+            previousDimensions.current.width = width;
+            previousDimensions.current.height = height;
         }
     };
+
+    useEffect(() => {
+        const resizeInterval = setInterval(resizeCanvases, 1000); // Resize canvases every second
+
+        return () => {
+            clearInterval(resizeInterval); // Clear the interval on unmount
+        };
+    }, []);
 
     useEffect(() => {
         const videoCanvas = videoCanvasRef.current;
@@ -351,11 +379,7 @@ const HandTracking: React.FC = () => {
         setConnectionStatus("connecting");
         connectWebSocket();
 
-        window.addEventListener("resize", resizeCanvases);
-        resizeCanvases();
-
         return () => {
-            window.removeEventListener("resize", resizeCanvases);
             if (reconnectTimeout.current) {
                 clearTimeout(reconnectTimeout.current);
             }

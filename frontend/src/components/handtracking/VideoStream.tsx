@@ -8,6 +8,10 @@ interface VideoStreamProps {
 const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const animationFrameRef = useRef<number>();
+    const previousDimensions = useRef<{ width: number; height: number }>({
+        width: 0,
+        height: 0,
+    });
 
     useEffect(() => {
         const video = videoRef.current;
@@ -32,13 +36,23 @@ const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
                 height = window.innerWidth / aspectRatio;
             }
 
-            // Set canvas dimensions
-            canvas.width = width;
-            canvas.height = height;
+            // Check if dimensions have changed
+            if (
+                previousDimensions.current.width !== width ||
+                previousDimensions.current.height !== height
+            ) {
+                // Set canvas dimensions
+                canvas.width = width;
+                canvas.height = height;
 
-            // Apply styles
-            canvas.style.width = `${width}px`;
-            canvas.style.height = `${height}px`;
+                // Apply styles
+                canvas.style.width = `${width}px`;
+                canvas.style.height = `${height}px`;
+
+                // Update previous dimensions
+                previousDimensions.current.width = width;
+                previousDimensions.current.height = height;
+            }
         };
 
         const drawVideoFrame = () => {
@@ -101,7 +115,8 @@ const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
             };
         });
 
-        window.addEventListener("resize", resizeCanvas); // Add resize event listener
+        // Set interval to resize canvas every second
+        const resizeInterval = setInterval(resizeCanvas, 1000);
 
         return () => {
             if (animationFrameRef.current) {
@@ -109,7 +124,7 @@ const VideoStream: React.FC<VideoStreamProps> = ({ canvasRef, wsRef }) => {
             }
             const tracks = video.srcObject as MediaStream;
             tracks?.getTracks().forEach((track) => track.stop());
-            window.removeEventListener("resize", resizeCanvas); // Clean up event listener
+            clearInterval(resizeInterval); // Clear the interval on unmount
         };
     }, [canvasRef, wsRef]);
 

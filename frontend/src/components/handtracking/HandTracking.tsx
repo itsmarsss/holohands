@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Controls from "../controls/Controls";
 import "./HandTracking.css";
 import Editable3DObject from "../3d/Editable3DObject";
@@ -33,51 +33,36 @@ function HandTracking() {
     const debugContext = useDebug();
     const debug = debugContext?.debug;
 
+    const leftCursorCoords = useRef<{ x: number; y: number }>({
+        x: 0,
+        y: 0,
+    });
+    const rightCursorCoords = useRef<{ x: number; y: number }>({
+        x: 0,
+        y: 0,
+    });
+
+    const cursorMap = useRef<{
+        [key: string]: React.MutableRefObject<{
+            x: number;
+            y: number;
+        }>;
+    }>({
+        leftCursor: leftCursorCoords,
+        rightCursor: rightCursorCoords,
+    });
+
     const updateCursorPosition = (
         elementId: string,
         targetX: number,
         targetY: number
     ) => {
-        const cursor = document.getElementById(elementId);
-        if (!cursor) return;
-
-        const { left: xOffset, top: yOffset } =
-            overlayCanvasRef.current?.getBoundingClientRect() || {
-                left: 0,
-                top: 0,
-            };
-
-        // Store previous cursor positions
-        const previousX = parseFloat(cursor.style.left) || 0;
-        const previousY = parseFloat(cursor.style.top) || 0;
-
-        // Smoothly interpolate to the target position
-        const smoothingFactor = 0.75; // Reduced value for faster response
-        const newX = previousX + (targetX - previousX) * smoothingFactor;
-        const newY = previousY + (targetY - previousY) * smoothingFactor;
-
-        cursor.style.left = `${newX}px`;
-        cursor.style.top = `${newY + yOffset}px`;
-
-        // Simulate button hover using the absolute position of the cursor.
-        const absoluteCursorX = newX + xOffset;
-        const absoluteCursorY = newY + yOffset;
-        const buttons = document.querySelectorAll(".button-column .button");
-        buttons.forEach((button) => {
-            const rect = button.getBoundingClientRect();
-            const toleranceX = rect.width * 0.2; // 20% tolerance on width
-            const toleranceY = rect.height * 0.2; // 20% tolerance on height
-            if (
-                absoluteCursorX >= rect.left - toleranceX &&
-                absoluteCursorX <= rect.right + toleranceX &&
-                absoluteCursorY >= rect.top - toleranceY &&
-                absoluteCursorY <= rect.bottom + toleranceY
-            ) {
-                button.classList.add("simulated-hover");
-            } else {
-                button.classList.remove("simulated-hover");
-            }
-        });
+        const cursor = cursorMap.current[elementId];
+        console.log("Cursor:", cursor);
+        if (cursor) {
+            cursor.current.x = targetX;
+            cursor.current.y = targetY;
+        }
     };
 
     // Pass the debug flag to the useSkeleton hook.
@@ -286,9 +271,16 @@ function HandTracking() {
                 }}
             />
 
-            <Cursor name="leftCursor" />
-            <Cursor name="rightCursor" />
-
+            <Cursor
+                name="leftCursor"
+                coords={cursorMap.current.leftCursor}
+                overlayCanvasRef={overlayCanvasRef}
+            />
+            <Cursor
+                name="rightCursor"
+                coords={cursorMap.current.rightCursor}
+                overlayCanvasRef={overlayCanvasRef}
+            />
             <ButtonColumn side="left" count={5} />
             <ButtonColumn side="right" count={5} />
             <CameraSelect

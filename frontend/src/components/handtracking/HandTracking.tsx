@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import VideoStream from "./VideoStream";
 import Controls from "./Controls";
 import "./HandTracking.css";
+import Editable3DObject from "../3d/Editable3DObject";
+import useWebSocket from "../../hooks/useWebsocket";
+import useVideoStream from "../../hooks/useVideoStream";
 
 interface Hand {
     handedness: "Left" | "Right";
@@ -20,9 +22,6 @@ interface Stroke {
     color: string;
     points: { x: number; y: number }[];
 }
-
-const WEBSOCKET_URL = "ws://localhost:6969/ws";
-const RECONNECT_DELAY = 3000; // milliseconds
 
 const HAND_COLORS: Record<"Left" | "Right", string> = {
     Left: "#FF0000", // Red
@@ -73,15 +72,28 @@ const smoothValue = (
 };
 
 const HandTracking: React.FC = () => {
-    const videoCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const ws = useRef<WebSocket | null>(null);
-    const reconnectTimeout = useRef<number>();
+    const {
+        wsUrl,
+        setWsUrl,
+        connectionStatus,
+        connect,
+        disconnect,
+        sendDataUrl,
+    } = useWebSocket();
+    const {
+        videoRef,
+        startStream,
+        stopStream,
+        captureFrame,
+        getAvailableCameras,
+        streamStatus,
+    } = useVideoStream();
+
+    const [frame, setFrame] = useState<string | null>(null);
 
     const [currentHandsData, setCurrentHandsData] = useState<Hand[]>([]);
-    const [connectionStatus, setConnectionStatus] = useState<
-        "connecting" | "connected" | "disconnected"
-    >("disconnected");
+
+    const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const previousPointerAngle = useRef<number | null>(null);
     const previousDimensions = useRef<{ width: number; height: number }>({
@@ -102,10 +114,49 @@ const HandTracking: React.FC = () => {
         Left: false,
         Right: false,
     });
+
     const distanceHistory = useRef<number[]>([]);
     const historyTime = useRef<number[]>([]);
     const smoothingFactor = 0.5;
-    const [acknowledged, setAcknowledged] = useState(false);
+
+    useEffect(() => {
+        setWsUrl("ws://localhost:6969/ws");
+        connect();
+
+        getAvailableCameras().then((cameras: MediaDeviceInfo[]) => {
+            if (cameras.length > 0) {
+                console.log("Available cameras:");
+                cameras.forEach((camera, index) => {
+                    console.log(`${index}: ${camera.label}`);
+                });
+                startStream(cameras[1].deviceId);
+            } else {
+                console.error("No cameras available");
+            }
+        });
+
+        return () => {
+            disconnect();
+            stopStream();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (streamStatus === "streaming" && connectionStatus === "connected") {
+            const frame = captureFrame();
+            if (frame?.length && frame.length > 100) {
+                console.log("Captured frame:", frame.length);
+                setFrame(frame);
+            } else {
+                console.log("Failed to capture frame.");
+            }
+        }
+    }, [streamStatus, connectionStatus]);
+
+    useEffect(() => {
+        console.log("Frame:", frame?.length);
+        sendDataUrl(frame);
+    }, [frame]);
 
     const drawHand = useCallback(
         (hand: Hand, imageSize: ImageSize, ctx: CanvasRenderingContext2D) => {
@@ -331,79 +382,12 @@ const HandTracking: React.FC = () => {
         ctx.restore();
     }, []);
 
-    const connectWebSocket = useCallback(() => {
-        if (ws.current?.readyState === WebSocket.OPEN) return;
-
-        try {
-            ws.current = new WebSocket(WEBSOCKET_URL);
-
-            ws.current.onopen = () => {
-                console.log("WebSocket connection established");
-                setConnectionStatus("connected");
-            };
-
-            ws.current.onerror = (error) => {
-                console.error("WebSocket error:", error);
-                setConnectionStatus("disconnected");
-            };
-
-            ws.current.onclose = () => {
-                console.log("WebSocket connection closed");
-                setConnectionStatus("disconnected");
-                reconnectTimeout.current = window.setTimeout(
-                    connectWebSocket,
-                    RECONNECT_DELAY
-                );
-            };
-
-            ws.current.onmessage = (event) => {
-                const overlayCanvas = overlayCanvasRef.current;
-                if (!overlayCanvas) return;
-                const ctx = overlayCanvas.getContext("2d");
-                if (!ctx) return;
-
-                try {
-                    const data = JSON.parse(event.data);
-                    // Clear overlay canvas before drawing new frame.
-                    ctx.clearRect(
-                        0,
-                        0,
-                        overlayCanvas.width,
-                        overlayCanvas.height
-                    );
-
-                    if (data.hands && data.hands.length > 0) {
-                        setCurrentHandsData(data.hands);
-                        // Draw each hand.
-                        data.hands.forEach((hand: Hand) => {
-                            drawHand(hand, data.image_size as ImageSize, ctx);
-                        });
-                    }
-                    // Draw all stored strokes.
-                    drawStrokes(ctx);
-
-                    setAcknowledged(false);
-                } catch (error) {
-                    console.error("Error processing message:", error);
-                }
-            };
-        } catch (error) {
-            console.error("Error creating WebSocket:", error);
-            setConnectionStatus("disconnected");
-            reconnectTimeout.current = window.setTimeout(
-                connectWebSocket,
-                RECONNECT_DELAY
-            );
-        }
-    }, [drawHand, drawStrokes]);
-
     const resizeCanvases = useCallback(() => {
-        const videoCanvas = videoCanvasRef.current;
         const overlayCanvas = overlayCanvasRef.current;
-        if (!videoCanvas || !overlayCanvas) return;
+        if (!overlayCanvas) return;
 
         // Use the intrinsic video dimensions to compute the aspect ratio.
-        const aspectRatio = videoCanvas.width / videoCanvas.height;
+        const aspectRatio = overlayCanvas.width / overlayCanvas.height;
         const windowAspectRatio = window.innerWidth / window.innerHeight;
 
         let width: number, height: number;
@@ -422,8 +406,6 @@ const HandTracking: React.FC = () => {
         )
             return;
 
-        videoCanvas.width = width;
-        videoCanvas.height = height;
         overlayCanvas.width = width;
         overlayCanvas.height = height;
         previousDimensions.current = { width, height };
@@ -435,47 +417,34 @@ const HandTracking: React.FC = () => {
         return () => clearInterval(resizeInterval);
     }, [resizeCanvases]);
 
-    useEffect(() => {
-        setConnectionStatus("connecting");
-        connectWebSocket();
-
-        return () => {
-            if (reconnectTimeout.current) {
-                clearTimeout(reconnectTimeout.current);
-            }
-            if (ws.current) {
-                ws.current.close();
-            }
-        };
-    }, [connectWebSocket]);
-
-    const handleAcknowledgment = () => {
-        setAcknowledged(true);
-    };
-
     return (
         <div id="container">
-            <VideoStream
-                canvasRef={videoCanvasRef}
-                wsRef={ws}
-                acknowledged={acknowledged}
-                onAcknowledge={handleAcknowledgment}
-            />
             <Controls currentHandsData={currentHandsData} />
-            <canvas ref={videoCanvasRef} />
+            <Editable3DObject />
             <canvas
+                className="overlay-canvas"
                 ref={overlayCanvasRef}
                 style={{ backgroundColor: "transparent" }}
             />
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                style={{
+                    display: "none", // Hide the video element
+                }}
+            />
             <div id="leftCursor" className="cursor" />
             <div id="rightCursor" className="cursor" />
-            {connectionStatus !== "connected" && (
-                <div className="connection-status">
-                    {connectionStatus === "connecting"
-                        ? "Connecting..."
-                        : "Disconnected - Retrying..."}
-                </div>
-            )}
+            <div className="connection-status">
+                {connectionStatus === "connected"
+                    ? "Connected"
+                    : connectionStatus === "connecting"
+                    ? "Connecting..."
+                    : "Disconnected - Retrying..."}
+                <br />
+                <i>{wsUrl || "No URL"}</i>
+            </div>
             <div id="left-buttons" className="button-column">
                 <button className="button">Button 1</button>
                 <button className="button">Button 2</button>

@@ -101,14 +101,15 @@ body {
     z-index: 1000;
 }
 
-canvas {
+.overlay-canvas {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    display: block; /* Prevents inline spacing issues */
-    max-width: 100%; /* Ensures it doesn't exceed the container */
-    height: auto; /* Maintains aspect ratio */
+    max-width: 100%;
+    height: auto;
+    z-index: 4;
+    pointer-events: none;
 }
 
 .dropdown-container {

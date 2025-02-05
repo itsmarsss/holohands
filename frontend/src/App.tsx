@@ -1,10 +1,13 @@
 import "./App.css";
 import HandTracking from "./components/handtracking/HandTracking";
+import { WebSocketProvider } from "./provider/WebSocketContext";
 
 function App() {
     return (
         <>
-            <HandTracking />
+            <WebSocketProvider url={"ws://localhost:6969/ws"}>
+                <HandTracking />
+            </WebSocketProvider>
         </>
     );
 }

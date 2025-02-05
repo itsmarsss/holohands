@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const useVideoStream = () => {
+function useVideoStream() {
     const [activeCamera, setActiveCamera] = useState<string | null>(null);
     const [streamStatus, setStreamStatus] = useState<
         "idle" | "loading" | "error" | "streaming" | "stopped"
@@ -38,7 +38,6 @@ const useVideoStream = () => {
             setActiveCamera(deviceId);
             if (videoRef.current) {
                 videoRef.current.srcObject = newStream;
-                videoRef.current.play();
             }
             setStreamStatus((_) => "streaming");
         } catch (error) {
@@ -68,7 +67,15 @@ const useVideoStream = () => {
         }
         canvas.width = videoRef.current.videoWidth;
         canvas.height = videoRef.current.videoHeight;
-        context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        context.scale(-1, 1);
+
+        context.drawImage(
+            videoRef.current,
+            -canvas.width,
+            0,
+            canvas.width,
+            canvas.height
+        );
         return canvas.toDataURL("image/png", 1);
     };
 
@@ -81,6 +88,6 @@ const useVideoStream = () => {
         captureFrame,
         videoRef,
     };
-};
+}
 
 export default useVideoStream;

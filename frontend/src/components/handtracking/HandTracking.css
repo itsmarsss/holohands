@@ -1,22 +1,3 @@
-body {
-    margin: 0;
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    background-color: black;
-}
-
-#container {
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-}
-
 #overlay {
     position: absolute;
     pointer-events: none;
@@ -102,11 +83,11 @@ body {
 }
 
 .overlay-canvas {
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     z-index: 4;
     pointer-events: none;
 }
@@ -117,4 +98,28 @@ body {
     left: 50%;
     transform: translateX(-50%);
     z-index: 10;
+}
+
+.handtracking-layout {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+}
+
+.handtracking-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.camera-select {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 5px;
+    border-radius: 3px;
 }

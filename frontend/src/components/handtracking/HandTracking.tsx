@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import Controls from "./Controls";
+import Controls from "../controls/Controls";
 import "./HandTracking.css";
 import Editable3DObject from "../3d/Editable3DObject";
 import useVideoStream from "../../hooks/useVideoStream";
 import { Hand } from "../../objects/hand";
 import { useWebSocket } from "../../provider/WebSocketContext";
 import useSkeleton from "../../hooks/useSkeleton";
+import CameraSelect from "../cameraselect/CameraSelect";
 
 function HandTracking() {
     const {
@@ -23,6 +24,7 @@ function HandTracking() {
     const lastTime = useRef<number>(Date.now());
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const { drawHand, drawStrokes } = useSkeleton({ overlayCanvasRef });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
@@ -31,13 +33,19 @@ function HandTracking() {
     });
 
     const [currentHandsData, setCurrentHandsData] = useState<Hand[]>([]);
-
     const [acknowledged, setAcknowledged] = useState(false);
+
+    // NEW: State to keep track of available cameras and the selected camera
+    const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
+        null
+    );
 
     const webSocketContext = useWebSocket();
     const status = webSocketContext?.status;
     const websocket = webSocketContext?.websocket;
 
+    // --- Update available cameras and initial stream ---
     useEffect(() => {
         getAvailableCameras().then((cameras: MediaDeviceInfo[]) => {
             if (cameras.length > 0) {
@@ -45,7 +53,13 @@ function HandTracking() {
                 cameras.forEach((camera, index) => {
                     console.log(`${index}: ${camera.label}`);
                 });
-                startStream(cameras[1].deviceId);
+                setVideoDevices(cameras);
+                // Select a default camera (if 2nd available, otherwise first).
+                const defaultDeviceId = cameras[1]
+                    ? cameras[1].deviceId
+                    : cameras[0].deviceId;
+                setSelectedDeviceId(defaultDeviceId);
+                startStream(defaultDeviceId);
             } else {
                 console.error("No cameras available");
             }
@@ -55,6 +69,15 @@ function HandTracking() {
             stopStream();
         };
     }, []);
+
+    // NEW: Handler that stops current stream and starts new one when selection changes.
+    const handleDeviceSelection = (deviceId: string | null) => {
+        if (deviceId && deviceId !== selectedDeviceId) {
+            stopStream();
+            startStream(deviceId);
+            setSelectedDeviceId(deviceId);
+        }
+    };
 
     useEffect(() => {
         console.log("Frame:", frame?.length);
@@ -98,11 +121,11 @@ function HandTracking() {
 
     const resizeCanvases = useCallback(() => {
         const overlayCanvas = overlayCanvasRef.current;
-        if (!overlayCanvas) return;
+        const container = containerRef.current;
+        if (!overlayCanvas || !container) return;
 
-        // Set canvas dimensions to fill the entire viewport.
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        // Get the dimensions of the right-hand container
+        const { width, height } = container.getBoundingClientRect();
 
         // Only update if dimensions have changed.
         if (
@@ -175,7 +198,7 @@ function HandTracking() {
     }, [frame]);
 
     return (
-        <div id="container">
+        <div className="handtracking-container" ref={containerRef}>
             <div
                 style={{
                     position: "absolute",
@@ -217,6 +240,11 @@ function HandTracking() {
                 <button className="button">Button 5</button>
                 <button className="button">Button 6</button>
             </div>
+            <CameraSelect
+                selectedDeviceId={selectedDeviceId}
+                setSelectedDeviceId={handleDeviceSelection}
+                videoDevices={videoDevices}
+            />
         </div>
     );
 }

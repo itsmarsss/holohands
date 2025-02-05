@@ -36,9 +36,9 @@ const updateCursorPosition = (
 ) => {
     const cursor = document.getElementById(elementId);
     if (!cursor) return;
-    const { left: xOffset, top: yOffset } = canvas.getBoundingClientRect();
-    cursor.style.left = `${x - 10 + xOffset}px`;
-    cursor.style.top = `${y - 10 + yOffset}px`;
+    const { top: yOffset } = canvas.getBoundingClientRect();
+    cursor.style.left = `${x}px`;
+    cursor.style.top = `${y + yOffset}px`;
 };
 
 const smoothValue = (

@@ -6,12 +6,16 @@ interface CameraSelectProps {
     videoDevices: MediaDeviceInfo[];
 }
 
-const CameraSelect: React.FC<CameraSelectProps> = React.memo(
-    ({ selectedDeviceId, setSelectedDeviceId, videoDevices }) => {
-        return (
+const CameraSelect: React.FC<CameraSelectProps> = ({
+    selectedDeviceId,
+    setSelectedDeviceId,
+    videoDevices,
+}) => {
+    return (
+        <div className="camera-select">
             <select
-                onChange={(e) => setSelectedDeviceId(e.target.value)}
                 value={selectedDeviceId || ""}
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
             >
                 {videoDevices.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
@@ -19,8 +23,8 @@ const CameraSelect: React.FC<CameraSelectProps> = React.memo(
                     </option>
                 ))}
             </select>
-        );
-    }
-);
+        </div>
+    );
+};
 
 export default CameraSelect;

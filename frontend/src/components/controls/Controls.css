@@ -1,0 +1,21 @@
+#controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+    gap: 10px;
+    display: flex;
+}
+
+.control-group {
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.control-group input {
+    padding: 5px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+}

@@ -1,4 +1,5 @@
 import React from "react";
+import "./CameraSelect.css";
 
 interface CameraSelectProps {
     selectedDeviceId: string | null;

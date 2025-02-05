@@ -25,7 +25,12 @@ function HandTracking() {
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const { drawHand, drawStrokes } = useSkeleton({ overlayCanvasRef });
+
+    // NEW: Add a debug toggle state.
+    const [debug, setDebug] = useState(false);
+
+    // Pass the debug flag to the useSkeleton hook.
+    const { drawHand, drawStrokes } = useSkeleton({ overlayCanvasRef, debug });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
         width: 0,
@@ -199,19 +204,17 @@ function HandTracking() {
 
     return (
         <div className="handtracking-container" ref={containerRef}>
-            <div
-                style={{
-                    position: "absolute",
-                    top: "10px",
-                    right: "10px",
-                    color: "white",
-                    backgroundColor: "rgba(0, 0, 0, 0.5)",
-                    padding: "5px",
-                    borderRadius: "3px",
-                    zIndex: 1000,
-                }}
-            >
-                {fps} FPS
+            <div className="fps-display">{fps} FPS</div>
+            {/* NEW: Debug toggle switch */}
+            <div className="debug-toggle">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked={debug}
+                        onChange={(e) => setDebug(e.target.checked)}
+                    />
+                    Debug
+                </label>
             </div>
             <Controls currentHandsData={currentHandsData} />
             <Editable3DObject />

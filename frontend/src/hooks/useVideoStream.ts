@@ -32,7 +32,11 @@ function useVideoStream() {
 
         try {
             const newStream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId },
+                video: {
+                    deviceId,
+                    width: { ideal: 640 }, // Set ideal width
+                    height: { ideal: 360 }, // Set ideal height
+                },
             });
             setStream(newStream);
             setActiveCamera(deviceId);
@@ -76,7 +80,7 @@ function useVideoStream() {
             canvas.width,
             canvas.height
         );
-        return canvas.toDataURL("image/png", 1);
+        return canvas.toDataURL("image/png", 0.5);
     };
 
     return {

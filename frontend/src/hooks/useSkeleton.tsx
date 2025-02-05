@@ -30,15 +30,26 @@ const computeDistance = (
 
 const updateCursorPosition = (
     elementId: string,
-    x: number,
-    y: number,
+    targetX: number,
+    targetY: number,
     canvas: HTMLCanvasElement
 ) => {
     const cursor = document.getElementById(elementId);
     if (!cursor) return;
+
     const { top: yOffset } = canvas.getBoundingClientRect();
-    cursor.style.left = `${x}px`;
-    cursor.style.top = `${y + yOffset}px`;
+
+    // Store previous cursor positions
+    const previousX = parseFloat(cursor.style.left) || 0;
+    const previousY = parseFloat(cursor.style.top) || 0;
+
+    // Smoothly interpolate to the target position
+    const smoothingFactor = 0.5; // Reduced value for faster response
+    const newX = previousX + (targetX - previousX) * smoothingFactor;
+    const newY = previousY + (targetY - previousY) * smoothingFactor;
+
+    cursor.style.left = `${newX}px`;
+    cursor.style.top = `${newY + yOffset}px`;
 };
 
 const smoothValue = (
@@ -52,9 +63,10 @@ const smoothValue = (
 
 interface UseSkeletonProps {
     overlayCanvasRef: React.RefObject<HTMLCanvasElement>;
+    debug?: boolean;
 }
 
-function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
+function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
 
     // Global strokes array, storing all strokes from either hand in order.
@@ -63,12 +75,6 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
     const currentStroke = useRef<Record<"Left" | "Right", Stroke | null>>({
         Left: null,
         Right: null,
-    });
-
-    // Whether each hand is currently drawing.
-    const isDrawing = useRef<Record<"Left" | "Right", boolean>>({
-        Left: false,
-        Right: false,
     });
 
     const distanceHistory = useRef<number[]>([]);
@@ -88,35 +94,49 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
                 imageSize.height
             );
 
-            // Draw hand connections.
-            ctx.strokeStyle = HAND_COLORS[hand.handedness];
-            ctx.lineWidth = 3;
-            ctx.globalAlpha = 0.8;
-            hand.connections.forEach(([start, end]) => {
-                ctx.beginPath();
-                ctx.moveTo(
-                    hand.landmarks[start][0] * scaleX,
-                    hand.landmarks[start][1] * scaleY
-                );
-                ctx.lineTo(
-                    hand.landmarks[end][0] * scaleX,
-                    hand.landmarks[end][1] * scaleY
-                );
-                ctx.stroke();
-            });
-
-            // Draw hand landmarks.
-            ctx.fillStyle = HAND_COLORS[hand.handedness];
-            ctx.globalAlpha = 1.0;
-            hand.landmarks.forEach((lm) => {
-                ctx.beginPath();
-                ctx.arc(lm[0] * scaleX, lm[1] * scaleY, 4, 0, 2 * Math.PI);
-                ctx.fill();
-            });
-
-            // Draw index-thumb connection.
+            // Calculate midpoints for cursor position
             const indexFinger = hand.landmarks[8];
             const thumb = hand.landmarks[4];
+            const midX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
+            const midY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
+
+            // Update cursor position smoothly
+            updateCursorPosition(
+                `${hand.handedness.toLowerCase()}Cursor`,
+                midX,
+                midY,
+                overlayCanvas
+            );
+
+            // --- Conditionally draw hand connections ---
+            if (debug) {
+                ctx.strokeStyle = HAND_COLORS[hand.handedness];
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = 0.8;
+                hand.connections.forEach(([start, end]) => {
+                    ctx.beginPath();
+                    ctx.moveTo(
+                        hand.landmarks[start][0] * scaleX,
+                        hand.landmarks[start][1] * scaleY
+                    );
+                    ctx.lineTo(
+                        hand.landmarks[end][0] * scaleX,
+                        hand.landmarks[end][1] * scaleY
+                    );
+                    ctx.stroke();
+                });
+
+                // Draw hand landmarks.
+                ctx.fillStyle = HAND_COLORS[hand.handedness];
+                ctx.globalAlpha = 1.0;
+                hand.landmarks.forEach((lm) => {
+                    ctx.beginPath();
+                    ctx.arc(lm[0] * scaleX, lm[1] * scaleY, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            }
+
+            // Draw index-thumb connection.
             ctx.strokeStyle = "#FFFFFF";
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -161,15 +181,13 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
                     Math.min(...xValues) +
                     (Math.max(...yValues) - Math.min(...yValues))) /
                 2;
-            const touchThreshold = avgDistance / 3;
+            const touchThreshold = avgDistance / 2;
 
             const stabilityThreshold = 10;
             const isHolding =
                 stdDev < stabilityThreshold &&
                 distanceIndexThumb < touchThreshold;
 
-            const midX = ((indexFinger[0] + thumb[0]) / 2) * scaleX;
-            const midY = ((indexFinger[1] + thumb[1]) / 2) * scaleY;
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "16px Arial";
             ctx.fillText(
@@ -193,11 +211,13 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
                 ) *
                     180) /
                 Math.PI;
-            ctx.fillText(
-                `Palm Angle: ${palmAngle.toFixed(2)}°`,
-                wrist[0] * scaleX,
-                wrist[1] * scaleY - 10
-            );
+            if (debug) {
+                ctx.fillText(
+                    `Palm Angle: ${palmAngle.toFixed(2)}°`,
+                    wrist[0] * scaleX,
+                    wrist[1] * scaleY - 10
+                );
+            }
 
             // Compute and display index-thumb angle.
             const indexThumbAngle =
@@ -207,11 +227,13 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
                 ) *
                     180) /
                 Math.PI;
-            ctx.fillText(
-                `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
-                indexFinger[0] * scaleX,
-                indexFinger[1] * scaleY - 30
-            );
+            if (debug) {
+                ctx.fillText(
+                    `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
+                    indexFinger[0] * scaleX,
+                    indexFinger[1] * scaleY - 30
+                );
+            }
 
             // Smooth pointer angle and update cursor position.
             const currentPointerAngle =
@@ -227,12 +249,6 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
                 smoothingFactor
             );
             previousPointerAngle.current = pointerAngle;
-            updateCursorPosition(
-                `${hand.handedness.toLowerCase()}Cursor`,
-                midX,
-                midY,
-                overlayCanvas
-            );
 
             // --- Stroke Drawing Logic (for separate strokes in one array) ---
             if (isHolding) {
@@ -269,7 +285,7 @@ function useSkeleton({ overlayCanvasRef }: UseSkeletonProps) {
             }
             ctx.restore();
         },
-        []
+        [debug, overlayCanvasRef]
     );
 
     // Draw each stroke separately from the global strokes array.

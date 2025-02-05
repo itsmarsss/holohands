@@ -274,16 +274,23 @@ function HandTracking() {
                 }}
             />
 
-            <Cursor
-                name="leftCursor"
-                coords={cursorMap.current.leftCursor}
-                overlayCanvasRef={overlayCanvasRef}
-            />
-            <Cursor
-                name="rightCursor"
-                coords={cursorMap.current.rightCursor}
-                overlayCanvasRef={overlayCanvasRef}
-            />
+            {/* Render left cursor if left hand is detected */}
+            {currentHandsData.some((hand) => hand.handedness === "Left") && (
+                <Cursor
+                    name="leftCursor"
+                    coords={cursorMap.current.leftCursor}
+                    overlayCanvasRef={overlayCanvasRef}
+                />
+            )}
+
+            {/* Render right cursor if right hand is detected */}
+            {currentHandsData.some((hand) => hand.handedness === "Right") && (
+                <Cursor
+                    name="rightCursor"
+                    coords={cursorMap.current.rightCursor}
+                    overlayCanvasRef={overlayCanvasRef}
+                />
+            )}
             <ButtonColumn side="left" count={5} />
             <ButtonColumn side="right" count={5} />
             <CameraSelect

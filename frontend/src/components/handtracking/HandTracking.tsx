@@ -90,6 +90,57 @@ function HandTracking() {
     const status = webSocketContext?.status;
     const websocket = webSocketContext?.websocket;
 
+    const [leftButtonColumnPeek, setLeftButtonColumnPeek] = useState(false);
+    const [rightButtonColumnPeek, setRightButtonColumnPeek] = useState(false);
+
+    // Function to calculate button column offset based on cursor positions
+    const calculateButtonColumnOffset = () => {
+        const leftCursorX = leftCursorCoords.current.x;
+        const rightCursorX = rightCursorCoords.current.x;
+
+        // Check if cursors are within 250px of the left or right borders
+        const canvasWidth = overlayCanvasRef.current?.offsetWidth;
+
+        let leftPeek = false;
+        let rightPeek = false;
+
+        if (currentHandsData.some((hand) => hand.handedness === "Left")) {
+            if (leftCursorX <= 200) {
+                leftPeek = leftPeek || true;
+            } else if (leftCursorX > 200) {
+                leftPeek = leftPeek || false;
+            }
+
+            if (canvasWidth) {
+                if (leftCursorX >= canvasWidth - 200) {
+                    rightPeek = rightPeek || true;
+                } else if (leftCursorX < canvasWidth - 200) {
+                    rightPeek = rightPeek || false;
+                }
+            }
+        }
+
+        if (currentHandsData.some((hand) => hand.handedness === "Right")) {
+            if (canvasWidth) {
+                if (rightCursorX >= canvasWidth - 200) {
+                    rightPeek = rightPeek || true;
+                } else if (rightCursorX < canvasWidth - 200) {
+                    rightPeek = rightPeek || false;
+                }
+            }
+
+            if (rightCursorX <= 200) {
+                leftPeek = leftPeek || true;
+            } else if (rightCursorX > 200) {
+                leftPeek = leftPeek || false;
+            }
+        }
+
+        // Update the state based on the flags
+        setLeftButtonColumnPeek(leftPeek);
+        setRightButtonColumnPeek(rightPeek);
+    };
+
     // Function to handle camera selection
     const handleDeviceSelection = (device: Device | null) => {
         if (device) {
@@ -244,6 +295,8 @@ function HandTracking() {
         });
         // Draw any strokes accumulated so far
         drawStrokes(ctx);
+
+        calculateButtonColumnOffset();
     }, [currentHandsData, drawHand, drawStrokes]);
 
     useEffect(() => {
@@ -291,8 +344,8 @@ function HandTracking() {
                     overlayCanvasRef={overlayCanvasRef}
                 />
             )}
-            <ButtonColumn side="left" count={5} />
-            <ButtonColumn side="right" count={5} />
+            <ButtonColumn side="left" count={5} peek={leftButtonColumnPeek} />
+            <ButtonColumn side="right" count={5} peek={rightButtonColumnPeek} />
             <CameraSelect
                 selectedDevice={selectedDevice}
                 setSelectedDevice={handleDeviceSelection}

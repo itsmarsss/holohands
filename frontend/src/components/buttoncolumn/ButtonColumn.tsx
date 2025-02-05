@@ -4,9 +4,10 @@ import { toast } from "react-toastify";
 interface ButtonColumnProps {
     side: "left" | "right";
     count: number;
+    peek: boolean;
 }
 
-function ButtonColumn({ side, count }: ButtonColumnProps) {
+function ButtonColumn({ side, count, peek }: ButtonColumnProps) {
     const handleClick = (index: number) => {
         toast.info(`Button ${index + 1} clicked!`);
     };
@@ -16,7 +17,7 @@ function ButtonColumn({ side, count }: ButtonColumnProps) {
             {Array.from({ length: count }).map((_, index) => (
                 <button
                     key={index}
-                    className="button"
+                    className={`button${peek ? " peek" : ""}`}
                     onClick={() => handleClick(index)}
                 >
                     Button {index + 1}

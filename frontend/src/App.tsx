@@ -8,13 +8,10 @@ function App() {
         <div className="app-container">
             <WebSocketProvider url={"ws://localhost:6969/ws"}>
                 {/* Left side: SideBar */}
-                <div className="sidebar-container">
-                    <SideBar />
-                </div>
+                <SideBar />
 
-                <div className="handtracking-container">
-                    <HandTracking />
-                </div>
+                {/* Right side: HandTracking */}
+                <HandTracking />
             </WebSocketProvider>
         </div>
     );

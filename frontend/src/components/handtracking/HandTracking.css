@@ -49,12 +49,6 @@
     pointer-events: none;
 }
 
-.handtracking-layout {
-    display: flex;
-    width: 100vw;
-    height: 100vh;
-}
-
 .handtracking-container {
     flex: 1;
     position: relative;

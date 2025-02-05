@@ -190,16 +190,14 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
 
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "16px Arial";
-            ctx.fillText(
-                `Distance: ${distanceIndexThumb.toFixed(2)} px`,
-                midX,
-                midY - 10
-            );
-            ctx.fillText(
-                isHolding ? "Holding" : "Not Holding",
-                midX,
-                midY + 10
-            );
+            if (debug) {
+                ctx.fillText(
+                    `Distance: ${distanceIndexThumb.toFixed(2)} px`,
+                    midX,
+                    midY - 10
+                );
+            }
+            ctx.fillText(isHolding ? "+" : "-", midX + 20, midY + 10);
 
             // Compute and display palm angle.
             const wrist = hand.landmarks[0];
@@ -278,8 +276,8 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
                 hand.detected_symbols.forEach((symbol, index) => {
                     ctx.fillText(
                         `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
-                        wrist[0] * scaleX,
-                        wrist[1] * scaleY + 20 + index * 20
+                        debug ? wrist[0] * scaleX : midX,
+                        (debug ? wrist[1] * scaleY : midY) + 20 + index * 20
                     );
                 });
             }

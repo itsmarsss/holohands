@@ -60,9 +60,7 @@ function HandTracking() {
                 });
                 setVideoDevices(cameras);
                 // Select a default camera (if 2nd available, otherwise first).
-                const defaultDeviceId = cameras[1]
-                    ? cameras[1].deviceId
-                    : cameras[0].deviceId;
+                const defaultDeviceId = cameras[0].deviceId;
                 setSelectedDeviceId(defaultDeviceId);
                 startStream(defaultDeviceId);
             } else {

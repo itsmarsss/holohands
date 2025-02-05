@@ -9,14 +9,21 @@ interface CursorProps {
 
 function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
-    const hoverState = useRef<{ [key: string]: boolean }>({}); // Track hover state for buttons
+    // Use a WeakMap to track hover state per button element without relying on button IDs.
+    const hoverState = useRef(new WeakMap<Element, boolean>());
+    // Track when the button started being hovered.
+    const hoverStartTimes = useRef(new WeakMap<Element, number>());
+    // Ref for the circular progress SVG circle.
+    const progressRef = useRef<SVGCircleElement>(null);
+
+    // Increase the progress circle radius so that it goes around the cursor.
+    const progressRadius = 20; // Increased radius (you can adjust as needed)
 
     useEffect(() => {
         let animationFrameId: number;
 
         const updateCursor = () => {
             if (!cursorRef.current) {
-                // Schedule next update if cursorRef is not yet ready.
                 animationFrameId = requestAnimationFrame(updateCursor);
                 return;
             }
@@ -58,15 +65,55 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                     absoluteCursorY >= rect.top - toleranceY &&
                     absoluteCursorY <= rect.bottom + toleranceY;
 
-                // Debounce hover state changes
-                if (isHovering && !hoverState.current[button.id]) {
-                    button.classList.add("simulated-hover");
-                    hoverState.current[button.id] = true; // Mark as hovered
-                } else if (!isHovering && hoverState.current[button.id]) {
-                    button.classList.remove("simulated-hover");
-                    hoverState.current[button.id] = false; // Mark as not hovered
+                const wasHovered = hoverState.current.get(button) || false;
+                if (isHovering) {
+                    if (!wasHovered) {
+                        button.classList.add("simulated-hover");
+                        hoverState.current.set(button, true);
+                        // Start the hover timer.
+                        hoverStartTimes.current.set(button, Date.now());
+                    } else {
+                        // Already in a hovered state; check duration.
+                        const startTime = hoverStartTimes.current.get(button);
+                        if (startTime && Date.now() - startTime >= 500) {
+                            // Trigger the click if hovered more than 500ms.
+                            (button as HTMLButtonElement).click();
+                            // Remove the timer to prevent repeated clicks.
+                            hoverStartTimes.current.delete(button);
+                        }
+                    }
+                } else {
+                    if (wasHovered) {
+                        button.classList.remove("simulated-hover");
+                        hoverState.current.set(button, false);
+                        hoverStartTimes.current.delete(button);
+                    }
                 }
             });
+
+            // Aggregate maximum progress from hovered buttons.
+            let maxProgress = 0;
+            buttons.forEach((button) => {
+                const startTime = hoverStartTimes.current.get(button);
+                if (startTime) {
+                    const progress = Math.min(
+                        (Date.now() - startTime) / 500,
+                        1
+                    );
+                    if (progress > maxProgress) {
+                        maxProgress = progress;
+                    }
+                }
+            });
+
+            if (progressRef.current) {
+                // For a circle of radius `progressRadius`, the circumference is:
+                const circumference = 2 * Math.PI * progressRadius;
+                const offset = circumference * (1 - maxProgress);
+                progressRef.current.style.strokeDashoffset = offset.toString();
+                // Only show the progress indicator if any button is being hovered.
+                progressRef.current.style.opacity = maxProgress > 0 ? "1" : "0";
+            }
 
             // Schedule the next frame.
             animationFrameId = requestAnimationFrame(updateCursor);
@@ -79,7 +126,44 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
         };
     }, [coords, overlayCanvasRef]);
 
-    return <div className="cursor" id={name} ref={cursorRef}></div>;
+    return (
+        <div className="cursor" id={name} ref={cursorRef}>
+            {/* Adjusted SVG: larger viewBox and repositioned center so the circle goes around the cursor */}
+            <svg
+                className="cursor-progress"
+                viewBox="0 0 40 40"
+                style={{
+                    width: "40px",
+                    height: "40px",
+                    position: "absolute",
+                    top: "-15px", // Offset so that the circle centers around the cursor element
+                    left: "-15px", // Adjust as necessary depending on your cursor dimensions
+                }}
+            >
+                <circle
+                    className="cursor-progress-background"
+                    cx="20"
+                    cy="20"
+                    r={15}
+                    fill="none"
+                    stroke="#ccc"
+                    strokeWidth="3"
+                />
+                <circle
+                    ref={progressRef}
+                    className="cursor-progress-bar"
+                    cx="20"
+                    cy="20"
+                    r={15}
+                    fill="none"
+                    stroke="#646cff"
+                    strokeWidth="3"
+                    strokeDasharray={2 * Math.PI * progressRadius}
+                    strokeDashoffset={2 * Math.PI * progressRadius}
+                />
+            </svg>
+        </div>
+    );
 }
 
 export default Cursor;

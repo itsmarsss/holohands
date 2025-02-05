@@ -154,11 +154,10 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
             const currentTime = Date.now();
             distanceHistory.current.push(distanceIndexThumb);
             historyTime.current.push(currentTime);
-
-            // Remove old history entries (> 100ms)
+            // Remove old history entries (> 200ms)
             while (
                 historyTime.current.length > 0 &&
-                currentTime - historyTime.current[0] > 100
+                currentTime - historyTime.current[0] > 200
             ) {
                 distanceHistory.current.shift();
                 historyTime.current.shift();
@@ -173,20 +172,20 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
                 ) / distanceHistory.current.length;
             const stdDev = Math.sqrt(variance);
 
-            // Drawing logic based on hand gesture.
+            // Compute hand spread to determine a relative threshold.
             const xValues = hand.landmarks.map((lm) => lm[0]);
             const yValues = hand.landmarks.map((lm) => lm[1]);
             const avgDistance =
                 (Math.max(...xValues) -
                     Math.min(...xValues) +
-                    (Math.max(...yValues) - Math.min(...yValues))) /
+                    Math.max(...yValues) -
+                    Math.min(...yValues)) /
                 2;
-            const touchThreshold = avgDistance / 2;
-
-            const stabilityThreshold = 10;
+            // Use relative thresholds based on hand spread.
+            const touchThreshold = 0.3 * avgDistance;
+            const stabilityThreshold = 0.05 * avgDistance;
             const isHolding =
-                stdDev < stabilityThreshold &&
-                distanceIndexThumb < touchThreshold;
+                movingAverage < touchThreshold && stdDev < stabilityThreshold;
 
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "16px Arial";

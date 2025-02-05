@@ -99,14 +99,8 @@ function HandTracking() {
         }
     }, [frame, streamStatus, websocket]);
 
-    // Single effect to control the captureFrame loop.
+    // Updated effect: new frame is captured only when previous one is acknowledged.
     useEffect(() => {
-        const timer = setTimeout(() => {
-            setAcknowledged(true);
-        }, 1000);
-
-        console.log(streamStatus);
-
         if (acknowledged && streamStatus === "streaming") {
             const capturedFrame = captureFrame();
             if (capturedFrame?.length && capturedFrame.length > 100) {
@@ -116,10 +110,17 @@ function HandTracking() {
                 console.log("Failed to capture frame.");
                 setFrame(null);
             }
+            // Prevent sending a new frame until the backend ack is received.
             setAcknowledged(false);
         }
-
-        return () => clearTimeout(timer);
+        // Fallback: if no ack is received within 1 second, re-enable capture.
+        const fallbackTimeout = setTimeout(() => {
+            if (!acknowledged) {
+                console.log("Fallback: Triggering acknowledgment timeout.");
+                setAcknowledged(true);
+            }
+        }, 1000);
+        return () => clearTimeout(fallbackTimeout);
     }, [acknowledged, streamStatus, captureFrame]);
 
     const resizeCanvases = useCallback(() => {
@@ -142,10 +143,23 @@ function HandTracking() {
         previousDimensions.current = { width, height };
     }, []);
 
-    // Resize canvases periodically (or consider using a ResizeObserver).
+    // Replace the following lines (previously using setInterval):
+    // useEffect(() => {
+    //     const resizeInterval = setInterval(resizeCanvases, 1000);
+    //     return () => clearInterval(resizeInterval);
+    // }, [resizeCanvases]);
+
+    // With this ResizeObserver-based effect:
     useEffect(() => {
-        const resizeInterval = setInterval(resizeCanvases, 1000);
-        return () => clearInterval(resizeInterval);
+        const container = containerRef.current;
+        if (!container) return;
+        const resizeObserver = new ResizeObserver(() => {
+            resizeCanvases();
+        });
+        resizeObserver.observe(container);
+        return () => {
+            resizeObserver.disconnect();
+        };
     }, [resizeCanvases]);
 
     useEffect(() => {
@@ -216,11 +230,7 @@ function HandTracking() {
             </div>
             <Controls currentHandsData={currentHandsData} />
             <Editable3DObject />
-            <canvas
-                className="overlay-canvas"
-                ref={overlayCanvasRef}
-                style={{ backgroundColor: "transparent" }}
-            />
+            <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             <video
                 ref={videoRef}
                 autoPlay

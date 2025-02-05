@@ -1,7 +1,42 @@
 .sidebar-container {
+    position: relative;
     width: 250px; /* Adjust width as needed */
     background-color: #333;
     color: #fff;
     padding: 20px;
     overflow-y: auto;
+    overflow-x: hidden;
+    transition: 200ms ease-in-out;
+}
+
+.sidebar-container.retracted {
+    width: 0;
+    padding: 0;
+}
+
+.sidebar-content {
+    width: 250px;
+}
+
+.toggle-button {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 200;
+    width: 35px;
+    height: 35px;
+    padding: 0;
+    border-radius: 0px;
+    border-bottom-right-radius: 10px;
+}
+
+.debug-toggle {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    color: white;
+    background-color: #00000080;
+    padding: 5px;
+    border-radius: 3px;
+    z-index: 1000;
 }

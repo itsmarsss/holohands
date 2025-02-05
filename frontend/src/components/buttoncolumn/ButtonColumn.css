@@ -12,12 +12,23 @@
 
 .button {
     height: 75px;
+    width: 200px;
+    transition: 50ms ease-out;
+}
+
+.button:hover {
+    transform: scale(1.1);
+}
+
+/* Ensure buttons also display hover effect when simulated by custom cursors */
+.button.simulated-hover {
+    transform: scale(1.1);
 }
 
 .button-column.left {
-    left: 10px;
+    left: 25px;
 }
 
 .button-column.right {
-    right: 10px;
+    right: 25px;
 }

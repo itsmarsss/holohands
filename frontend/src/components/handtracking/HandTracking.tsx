@@ -9,6 +9,7 @@ import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
 import ButtonColumn from "../buttoncolumn/ButtonColumn";
 import Cursor from "../cursor/Cursor";
+import { useDebug } from "../../provider/DebugContext";
 
 function HandTracking() {
     const {
@@ -28,8 +29,9 @@ function HandTracking() {
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
 
-    // NEW: Add a debug toggle state.
-    const [debug, setDebug] = useState(false);
+    // Add a debug toggle state.
+    const debugContext = useDebug();
+    const debug = debugContext?.debug;
 
     const updateCursorPosition = (
         elementId: string,
@@ -39,20 +41,43 @@ function HandTracking() {
         const cursor = document.getElementById(elementId);
         if (!cursor) return;
 
-        const { top: yOffset } =
-            overlayCanvasRef.current?.getBoundingClientRect() || { top: 0 };
+        const { left: xOffset, top: yOffset } =
+            overlayCanvasRef.current?.getBoundingClientRect() || {
+                left: 0,
+                top: 0,
+            };
 
         // Store previous cursor positions
         const previousX = parseFloat(cursor.style.left) || 0;
         const previousY = parseFloat(cursor.style.top) || 0;
 
         // Smoothly interpolate to the target position
-        const smoothingFactor = 0.5; // Reduced value for faster response
+        const smoothingFactor = 0.75; // Reduced value for faster response
         const newX = previousX + (targetX - previousX) * smoothingFactor;
         const newY = previousY + (targetY - previousY) * smoothingFactor;
 
         cursor.style.left = `${newX}px`;
         cursor.style.top = `${newY + yOffset}px`;
+
+        // Simulate button hover using the absolute position of the cursor.
+        const absoluteCursorX = newX + xOffset;
+        const absoluteCursorY = newY + yOffset;
+        const buttons = document.querySelectorAll(".button-column .button");
+        buttons.forEach((button) => {
+            const rect = button.getBoundingClientRect();
+            const toleranceX = rect.width * 0.2; // 20% tolerance on width
+            const toleranceY = rect.height * 0.2; // 20% tolerance on height
+            if (
+                absoluteCursorX >= rect.left - toleranceX &&
+                absoluteCursorX <= rect.right + toleranceX &&
+                absoluteCursorY >= rect.top - toleranceY &&
+                absoluteCursorY <= rect.bottom + toleranceY
+            ) {
+                button.classList.add("simulated-hover");
+            } else {
+                button.classList.remove("simulated-hover");
+            }
+        });
     };
 
     // Pass the debug flag to the useSkeleton hook.
@@ -70,7 +95,7 @@ function HandTracking() {
     const [currentHandsData, setCurrentHandsData] = useState<Hand[]>([]);
     const [acknowledged, setAcknowledged] = useState(false);
 
-    // NEW: State to keep track of available cameras and the selected camera
+    // State to keep track of available cameras and the selected camera
     const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
         null
@@ -103,7 +128,7 @@ function HandTracking() {
         };
     }, []);
 
-    // NEW: Handler that stops current stream and starts new one when selection changes.
+    // Handler that stops current stream and starts new one when selection changes.
     const handleDeviceSelection = (deviceId: string | null) => {
         if (deviceId && deviceId !== selectedDeviceId) {
             stopStream();
@@ -248,18 +273,7 @@ function HandTracking() {
         <div ref={containerRef} className="handtracking-container">
             {/* Display the WebSocket connection status */}
             <div className="connection-status">{status}</div>
-            <div className="fps-display">{fps} FPS</div>
-            {/* NEW: Debug toggle switch */}
-            <div className="debug-toggle">
-                <label>
-                    <input
-                        type="checkbox"
-                        checked={debug}
-                        onChange={(e) => setDebug(e.target.checked)}
-                    />
-                    Debug
-                </label>
-            </div>
+            {debug && <div className="fps-display">{fps} FPS</div>}
             <Controls currentHandsData={currentHandsData} />
             <Editable3DObject />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />

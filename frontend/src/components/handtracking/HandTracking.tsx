@@ -10,6 +10,8 @@ import CameraSelect from "../cameraselect/CameraSelect";
 import ButtonColumn from "../buttoncolumn/ButtonColumn";
 import Cursor from "../cursor/Cursor";
 import { useDebug } from "../../provider/DebugContext";
+import { toast } from "react-toastify";
+import { Device } from "../../objects/device";
 
 function HandTracking() {
     const {
@@ -82,13 +84,20 @@ function HandTracking() {
 
     // State to keep track of available cameras and the selected camera
     const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-    const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
-        null
-    );
+    const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
     const webSocketContext = useWebSocket();
     const status = webSocketContext?.status;
     const websocket = webSocketContext?.websocket;
+
+    // Function to handle camera selection
+    const handleDeviceSelection = (device: Device | null) => {
+        if (device) {
+            setSelectedDevice(device);
+            toast.info(`Using ${device.label}`);
+            startStream(device.deviceId);
+        }
+    };
 
     // --- Update available cameras and initial stream ---
     useEffect(() => {
@@ -101,7 +110,10 @@ function HandTracking() {
                 setVideoDevices(cameras);
                 // Select a default camera (if 2nd available, otherwise first).
                 const defaultDeviceId = cameras[0].deviceId;
-                setSelectedDeviceId(defaultDeviceId);
+                setSelectedDevice({
+                    deviceId: defaultDeviceId,
+                    label: cameras[0].label,
+                });
                 startStream(defaultDeviceId);
             } else {
                 console.error("No cameras available");
@@ -112,15 +124,6 @@ function HandTracking() {
             stopStream();
         };
     }, []);
-
-    // Handler that stops current stream and starts new one when selection changes.
-    const handleDeviceSelection = (deviceId: string | null) => {
-        if (deviceId && deviceId !== selectedDeviceId) {
-            stopStream();
-            startStream(deviceId);
-            setSelectedDeviceId(deviceId);
-        }
-    };
 
     useEffect(() => {
         console.log("Frame:", frame?.length);
@@ -284,8 +287,8 @@ function HandTracking() {
             <ButtonColumn side="left" count={5} />
             <ButtonColumn side="right" count={5} />
             <CameraSelect
-                selectedDeviceId={selectedDeviceId}
-                setSelectedDeviceId={handleDeviceSelection}
+                selectedDevice={selectedDevice}
+                setSelectedDevice={handleDeviceSelection}
                 videoDevices={videoDevices}
             />
         </div>

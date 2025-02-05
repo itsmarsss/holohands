@@ -1,5 +1,6 @@
 import React from "react";
 import "./Controls.css";
+import { toast } from "react-toastify";
 
 interface Hand {
     handedness: string;
@@ -21,7 +22,7 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
         )?.value;
 
         if (!name) {
-            alert("Please enter a name for the hand symbol.");
+            toast.error("Please enter a symbol name.");
             return;
         }
 
@@ -30,7 +31,7 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
         );
 
         if (!handData) {
-            alert(`No ${handedness} hand detected.`);
+            toast.error(`No ${handedness} hand detected.`);
             return;
         }
 
@@ -52,13 +53,13 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
 
             const data = await response.json();
             if (data.status === "success") {
-                alert(`${handedness} hand symbol saved successfully.`);
+                toast.success(`${handedness} symbol saved successfully.`);
             } else {
-                alert(`Failed to save ${handedness} hand symbol.`);
+                toast.error(`Failed to save ${handedness} symbol.`);
             }
         } catch (error) {
             console.error("Error:", error);
-            alert(`Failed to save ${handedness} hand symbol.`);
+            toast.error(`Failed to save ${handedness} symbol.`);
         }
     };
 

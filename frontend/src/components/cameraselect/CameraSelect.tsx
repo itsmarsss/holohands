@@ -1,22 +1,30 @@
 import React from "react";
 import "./CameraSelect.css";
+import { Device } from "../../objects/device";
 
 interface CameraSelectProps {
-    selectedDeviceId: string | null;
-    setSelectedDeviceId: (deviceId: string | null) => void;
+    selectedDevice: Device | null;
+    setSelectedDevice: (device: Device | null) => void;
     videoDevices: MediaDeviceInfo[];
 }
 
 const CameraSelect: React.FC<CameraSelectProps> = ({
-    selectedDeviceId,
-    setSelectedDeviceId,
+    selectedDevice,
+    setSelectedDevice,
     videoDevices,
 }) => {
     return (
         <div className="camera-select">
             <select
-                value={selectedDeviceId || ""}
-                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                value={selectedDevice?.deviceId || ""}
+                onChange={(e) =>
+                    setSelectedDevice({
+                        deviceId: e.target.value,
+                        label:
+                            (e.target as HTMLSelectElement).selectedOptions[0]
+                                ?.textContent || "Unknown",
+                    })
+                }
             >
                 {videoDevices.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>

@@ -1,4 +1,5 @@
 import "./ButtonColumn.css";
+import { toast } from "react-toastify";
 
 interface ButtonColumnProps {
     side: "left" | "right";
@@ -6,13 +7,17 @@ interface ButtonColumnProps {
 }
 
 function ButtonColumn({ side, count }: ButtonColumnProps) {
+    const handleClick = (index: number) => {
+        toast.info(`Button ${index + 1} clicked!`);
+    };
+
     return (
         <div className={`button-column ${side}`}>
             {Array.from({ length: count }).map((_, index) => (
                 <button
                     key={index}
                     className="button"
-                    onClick={() => console.log(`Button ${index + 1} clicked`)}
+                    onClick={() => handleClick(index)}
                 >
                     Button {index + 1}
                 </button>

@@ -65,6 +65,7 @@ def save_handsymbol():
 
     return jsonify({'status': 'success'})
 
+
 @WebSocketWSGI
 def handle_websocket(ws):
     try:
@@ -73,18 +74,28 @@ def handle_websocket(ws):
             if message is None:
                 break
 
-            # Decode the base64 image
-            image_data = base64.b64decode(message.split(",")[1])
-            image = Image.open(BytesIO(image_data))
-            frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+            # Decode the base64 image directly with OpenCV
+            img_data = base64.b64decode(message.split(",")[1])
+            img_array = np.frombuffer(img_data, np.uint8)
+            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
 
             # Process frame
             h, w = frame.shape[:2]
+            
+
             results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             hands_data = []
+            # Limit to one hand per handedness (e.g., one left and one right)
+            detected = {"Left": False, "Right": False}
             if results.multi_hand_landmarks:
                 for idx, landmarks in enumerate(results.multi_hand_landmarks):
                     handedness = results.multi_handedness[idx].classification[0].label
+                    # If we've already processed a hand with this label, skip it
+                    if detected.get(handedness, False):
+                        continue
+                    detected[handedness] = True
                     connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
                     hand_landmarks = [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark]
 

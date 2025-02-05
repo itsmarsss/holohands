@@ -1,0 +1,23 @@
+.button-column {
+    position: absolute;
+    top: 0;
+    height: calc(100% - 100px);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    gap: 10px;
+    z-index: 20;
+    padding-bottom: 60px;
+}
+
+.button {
+    height: 75px;
+}
+
+.button-column.left {
+    left: 10px;
+}
+
+.button-column.right {
+    right: 10px;
+}

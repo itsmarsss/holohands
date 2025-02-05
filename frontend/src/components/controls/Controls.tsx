@@ -68,20 +68,20 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
                 <input
                     type="text"
                     id="leftHandName"
-                    placeholder="Left Hand Symbol Name"
+                    placeholder="L-H Sym Name"
                 />
                 <button onClick={() => saveHandSymbol("Left")}>
-                    Save Left Hand Symbol
+                    Save L-H Sym
                 </button>
             </div>
             <div className="control-group">
                 <input
                     type="text"
                     id="rightHandName"
-                    placeholder="Right Hand Symbol Name"
+                    placeholder="R-H Sym Name"
                 />
                 <button onClick={() => saveHandSymbol("Right")}>
-                    Save Right Hand Symbol
+                    Save R-H Sym
                 </button>
             </div>
         </div>

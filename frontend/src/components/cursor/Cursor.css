@@ -1,0 +1,10 @@
+.cursor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: yellow;
+    pointer-events: none;
+    z-index: 10;
+    transform: translate(-50%, -50%); /* Center the cursor on the point */
+}

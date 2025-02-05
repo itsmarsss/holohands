@@ -28,30 +28,6 @@ const computeDistance = (
             Math.pow((p1[1] - p2[1]) * scaleY, 2)
     );
 
-const updateCursorPosition = (
-    elementId: string,
-    targetX: number,
-    targetY: number,
-    canvas: HTMLCanvasElement
-) => {
-    const cursor = document.getElementById(elementId);
-    if (!cursor) return;
-
-    const { top: yOffset } = canvas.getBoundingClientRect();
-
-    // Store previous cursor positions
-    const previousX = parseFloat(cursor.style.left) || 0;
-    const previousY = parseFloat(cursor.style.top) || 0;
-
-    // Smoothly interpolate to the target position
-    const smoothingFactor = 0.5; // Reduced value for faster response
-    const newX = previousX + (targetX - previousX) * smoothingFactor;
-    const newY = previousY + (targetY - previousY) * smoothingFactor;
-
-    cursor.style.left = `${newX}px`;
-    cursor.style.top = `${newY + yOffset}px`;
-};
-
 const smoothValue = (
     previous: number | null,
     current: number,
@@ -64,9 +40,18 @@ const smoothValue = (
 interface UseSkeletonProps {
     overlayCanvasRef: React.RefObject<HTMLCanvasElement>;
     debug?: boolean;
+    updateCursorPosition: (
+        name: string,
+        targetX: number,
+        targetY: number
+    ) => void;
 }
 
-function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
+function useSkeleton({
+    overlayCanvasRef,
+    debug = false,
+    updateCursorPosition,
+}: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
 
     // Global strokes array, storing all strokes from either hand in order.
@@ -104,8 +89,7 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
             updateCursorPosition(
                 `${hand.handedness.toLowerCase()}Cursor`,
                 midX,
-                midY,
-                overlayCanvas
+                midY
             );
 
             // --- Conditionally draw hand connections ---
@@ -182,7 +166,7 @@ function useSkeleton({ overlayCanvasRef, debug = false }: UseSkeletonProps) {
                     Math.min(...yValues)) /
                 2;
             // Use relative thresholds based on hand spread.
-            const touchThreshold = 0.3 * avgDistance;
+            const touchThreshold = 0.5 * avgDistance;
             const stabilityThreshold = 0.05 * avgDistance;
             const isHolding =
                 movingAverage < touchThreshold && stdDev < stabilityThreshold;

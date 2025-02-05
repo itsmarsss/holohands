@@ -7,6 +7,8 @@ import { Hand } from "../../objects/hand";
 import { useWebSocket } from "../../provider/WebSocketContext";
 import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
+import ButtonColumn from "../buttoncolumn/ButtonColumn";
+import Cursor from "../cursor/Cursor";
 
 function HandTracking() {
     const {
@@ -29,8 +31,36 @@ function HandTracking() {
     // NEW: Add a debug toggle state.
     const [debug, setDebug] = useState(false);
 
+    const updateCursorPosition = (
+        elementId: string,
+        targetX: number,
+        targetY: number
+    ) => {
+        const cursor = document.getElementById(elementId);
+        if (!cursor) return;
+
+        const { top: yOffset } =
+            overlayCanvasRef.current?.getBoundingClientRect() || { top: 0 };
+
+        // Store previous cursor positions
+        const previousX = parseFloat(cursor.style.left) || 0;
+        const previousY = parseFloat(cursor.style.top) || 0;
+
+        // Smoothly interpolate to the target position
+        const smoothingFactor = 0.5; // Reduced value for faster response
+        const newX = previousX + (targetX - previousX) * smoothingFactor;
+        const newY = previousY + (targetY - previousY) * smoothingFactor;
+
+        cursor.style.left = `${newX}px`;
+        cursor.style.top = `${newY + yOffset}px`;
+    };
+
     // Pass the debug flag to the useSkeleton hook.
-    const { drawHand, drawStrokes } = useSkeleton({ overlayCanvasRef, debug });
+    const { drawHand, drawStrokes } = useSkeleton({
+        overlayCanvasRef,
+        debug,
+        updateCursorPosition,
+    });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
         width: 0,
@@ -215,7 +245,9 @@ function HandTracking() {
     }, [frame]);
 
     return (
-        <div className="handtracking-container" ref={containerRef}>
+        <div ref={containerRef} className="handtracking-container">
+            {/* Display the WebSocket connection status */}
+            <div className="connection-status">{status}</div>
             <div className="fps-display">{fps} FPS</div>
             {/* NEW: Debug toggle switch */}
             <div className="debug-toggle">
@@ -239,18 +271,12 @@ function HandTracking() {
                     display: "none", // Hide the video element
                 }}
             />
-            <div id="leftCursor" className="cursor" />
-            <div id="rightCursor" className="cursor" />
-            <div id="left-buttons" className="button-column">
-                <button className="button">Button 1</button>
-                <button className="button">Button 2</button>
-                <button className="button">Button 3</button>
-            </div>
-            <div id="right-buttons" className="button-column">
-                <button className="button">Button 4</button>
-                <button className="button">Button 5</button>
-                <button className="button">Button 6</button>
-            </div>
+
+            <Cursor name="leftCursor" />
+            <Cursor name="rightCursor" />
+
+            <ButtonColumn side="left" count={5} />
+            <ButtonColumn side="right" count={5} />
             <CameraSelect
                 selectedDeviceId={selectedDeviceId}
                 setSelectedDeviceId={handleDeviceSelection}

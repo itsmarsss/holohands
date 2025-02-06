@@ -8,7 +8,7 @@ import { VideoStreamProvider } from "./provider/VideoStreamContext";
 function App() {
     return (
         <div className="app-container">
-            <DebugContextProvider defaultDebug={true}>
+            <DebugContextProvider defaultDebug={false}>
                 <WebSocketProvider url={"ws://localhost:6969/ws"}>
                     <VideoStreamProvider>
                         {/* Left side: SideBar */}

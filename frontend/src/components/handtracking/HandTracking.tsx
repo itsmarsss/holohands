@@ -60,13 +60,15 @@ function HandTracking() {
 
     // New state for 3D object rotation (angles in degrees)
     const [objectRotation, setObjectRotation] = useState({ x: 0, y: 0, z: 0 });
+    // New state for 3D object zoom (scale factor)
+    const [objectZoom, setObjectZoom] = useState(1);
 
     // Define onPinchMove callback to update 3D object rotation.
     const handlePinchMove = useCallback(
         (handedness: "Left" | "Right", deltaX: number, deltaY: number) => {
-            // For example, only update rotation for the right hand.
+            // For example, update rotation for the right hand when not in zoom mode.
             if (handedness === "Right") {
-                const rotationFactor = 0.01; // adjust sensitivity as needed
+                const rotationFactor = 0.005; // adjust sensitivity as needed
                 setObjectRotation((prev) => ({
                     x: prev.x + deltaY * rotationFactor,
                     y: prev.y + deltaX * rotationFactor,
@@ -77,12 +79,29 @@ function HandTracking() {
         []
     );
 
+    const handleZoom = useCallback((delta: number) => {
+        const zoomSensitivity = 0.005; // Base sensitivity
+        setObjectZoom((prev) => {
+            // Calculate the new zoom level
+            let newZoom = prev + delta * zoomSensitivity;
+
+            // Apply a diminishing return effect on zoom sensitivity
+            const zoomFactor = Math.log(newZoom + 1); // Logarithmic scaling
+            newZoom = prev + (delta * zoomSensitivity) / zoomFactor;
+
+            // Optionally clamp zoom between 0.05 and 5.
+            newZoom = Math.max(0.5, Math.min(5, newZoom));
+            return newZoom;
+        });
+    }, []);
+
     // Pass the new onPinchMove callback into useSkeleton along with updateCursorPosition.
     const { drawHand, drawStrokes } = useSkeleton({
         overlayCanvasRef,
         debug,
         updateCursorPosition,
         onPinchMove: handlePinchMove,
+        onZoom: handleZoom,
     });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
@@ -106,7 +125,6 @@ function HandTracking() {
     const captureFrame = videoStreamContext?.captureFrame;
     const getAvailableCameras = videoStreamContext?.getAvailableCameras;
     const setActiveCamera = videoStreamContext?.setActiveCamera;
-    const videoRef = videoStreamContext?.videoRef;
 
     const [leftButtonColumnPeek, setLeftButtonColumnPeek] = useState(false);
     const [rightButtonColumnPeek, setRightButtonColumnPeek] = useState(false);
@@ -330,17 +348,12 @@ function HandTracking() {
             <div className="connection-status">{webSocketStatus}</div>
             {debug && <div className="fps-display">{fps} FPS</div>}
             <Controls currentHandsData={currentHandsData} />
-            <Editable3DObject rotation={objectRotation} />
-            <canvas className="overlay-canvas" ref={overlayCanvasRef} />
-            <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                style={{
-                    display: "none", // Hide the video element
-                }}
+            <Editable3DObject
+                rotation={objectRotation}
+                zoom={objectZoom}
+                onRotationChange={setObjectRotation}
             />
-
+            <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             {/* Render left cursor if left hand is detected */}
             {currentHandsData.some((hand) => hand.handedness === "Left") && (
                 <Cursor
@@ -349,7 +362,6 @@ function HandTracking() {
                     overlayCanvasRef={overlayCanvasRef}
                 />
             )}
-
             {/* Render right cursor if right hand is detected */}
             {currentHandsData.some((hand) => hand.handedness === "Right") && (
                 <Cursor

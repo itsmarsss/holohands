@@ -38,6 +38,21 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
 
+    // Auto-select a camera on mount if none is selected.
+    useEffect(() => {
+        const initCamera = async () => {
+            const cameras = await getAvailableCameras();
+            if (cameras.length > 0 && !activeCamera) {
+                console.log(
+                    "Auto-selecting first camera:",
+                    cameras[0].deviceId
+                );
+                setActiveCamera(cameras[0].deviceId);
+            }
+        };
+        initCamera();
+    }, []); // empty dependency: run once on mount
+
     useEffect(() => {
         if (activeCamera) {
             startStream(activeCamera);

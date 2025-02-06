@@ -50,6 +50,7 @@ interface UseSkeletonProps {
         deltaX: number,
         deltaY: number
     ) => void;
+    onZoom?: (deltaZoom: number) => void;
 }
 
 function useSkeleton({
@@ -57,6 +58,7 @@ function useSkeleton({
     debug = false,
     updateCursorPosition,
     onPinchMove,
+    onZoom,
 }: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
 
@@ -67,6 +69,10 @@ function useSkeleton({
         Left: null,
         Right: null,
     });
+
+    const distanceHistory = useRef<number[]>([]);
+
+    const historyTime = useRef<number[]>([]);
 
     // Add pinch start tracking for each hand for a new hold detection system.
     const pinchStartRef = useRef<Record<"Left" | "Right", number | null>>({
@@ -88,6 +94,9 @@ function useSkeleton({
         Right: null,
     });
     const smoothingFactor = 0.5;
+
+    // Add a ref to store the previous distance between the two pinch positions.
+    const previousPinchDistanceRef = useRef<number | null>(null);
 
     const drawHand = useCallback(
         (hand: Hand, imageSize: ImageSize, ctx: CanvasRenderingContext2D) => {
@@ -160,6 +169,34 @@ function useSkeleton({
             );
             const currentTime = Date.now();
 
+            distanceHistory.current.push(distanceIndexThumb);
+
+            historyTime.current.push(currentTime);
+
+            // Remove old history entries (> 200ms)
+
+            while (
+                historyTime.current.length > 0 &&
+                currentTime - historyTime.current[0] > 200
+            ) {
+                distanceHistory.current.shift();
+
+                historyTime.current.shift();
+            }
+
+            const movingAverage =
+                distanceHistory.current.reduce((sum, val) => sum + val, 0) /
+                distanceHistory.current.length;
+
+            const variance =
+                distanceHistory.current.reduce(
+                    (sum, val) => sum + Math.pow(val - movingAverage, 2),
+
+                    0
+                ) / distanceHistory.current.length;
+
+            const stdDev = Math.sqrt(variance);
+
             // Compute hand spread to determine a relative pinch threshold.
             const xValues = hand.landmarks.map((lm) => lm[0]);
             const yValues = hand.landmarks.map((lm) => lm[1]);
@@ -171,7 +208,16 @@ function useSkeleton({
                 2;
             const pinchThreshold = 0.35 * avgDistance;
 
-            let isHolding = false;
+            // Use relative thresholds based on hand spread.
+
+            const touchThreshold = 0.5 * avgDistance;
+
+            const stabilityThreshold = 0.05 * avgDistance;
+
+            const isHolding =
+                movingAverage < touchThreshold && stdDev < stabilityThreshold;
+
+            let isPinching = false;
             if (distanceIndexThumb < pinchThreshold) {
                 if (!pinchStartRef.current[hand.handedness]) {
                     pinchStartRef.current[hand.handedness] = currentTime;
@@ -179,11 +225,11 @@ function useSkeleton({
                     currentTime - pinchStartRef.current[hand.handedness]! >
                     100
                 ) {
-                    isHolding = true;
+                    isPinching = true;
                 }
             } else {
                 pinchStartRef.current[hand.handedness] = null;
-                isHolding = false;
+                isPinching = false;
             }
 
             // Determine mode: rotation if thumb, index and middle finger are together.
@@ -231,64 +277,105 @@ function useSkeleton({
             );
             previousPointerAngle.current = pointerAngle;
 
-            // --- Stroke Drawing Logic ---
             if (isHolding) {
-                if (isRotate && typeof onPinchMove === "function") {
-                    // --- Rotation mode: trigger onPinchMove with smoothed delta ---
-                    const prevPos = pinchPrevPosRef.current[hand.handedness];
-                    if (prevPos) {
-                        const rawDeltaX = midX - prevPos.x;
-                        const rawDeltaY = midY - prevPos.y;
-                        const pinchSmoothingFactor = 0.2; // Adjust sensitivity as needed
+                // If no active stroke exists for this hand, create one and add it to the global strokes array.
 
-                        let smoothedDelta = {
-                            deltaX: rawDeltaX,
-                            deltaY: rawDeltaY,
-                        };
-                        const prevSmoothed =
-                            pinchDeltaSmoothingRef.current[hand.handedness];
-                        if (prevSmoothed) {
-                            smoothedDelta = {
-                                deltaX:
-                                    prevSmoothed.deltaX *
-                                        (1 - pinchSmoothingFactor) +
-                                    rawDeltaX * pinchSmoothingFactor,
-                                deltaY:
-                                    prevSmoothed.deltaY *
-                                        (1 - pinchSmoothingFactor) +
-                                    rawDeltaY * pinchSmoothingFactor,
-                            };
-                        }
-                        pinchDeltaSmoothingRef.current[hand.handedness] =
-                            smoothedDelta;
-                        onPinchMove(
-                            hand.handedness,
-                            smoothedDelta.deltaX,
-                            smoothedDelta.deltaY
-                        );
-                    }
-                    // Update the previous pinch position for rotation mode.
-                    pinchPrevPosRef.current[hand.handedness] = {
-                        x: midX,
-                        y: midY,
+                if (!currentStroke.current[hand.handedness]) {
+                    currentStroke.current[hand.handedness] = {
+                        hand: hand.handedness,
+
+                        color: HAND_COLORS[hand.handedness],
+
+                        points: [],
                     };
-                } else {
-                    // --- Drawing mode: update stroke drawing logic ---
-                    if (!currentStroke.current[hand.handedness]) {
-                        currentStroke.current[hand.handedness] = {
-                            hand: hand.handedness,
-                            color: HAND_COLORS[hand.handedness],
-                            points: [],
-                        };
-                        strokes.current.push(
-                            currentStroke.current[hand.handedness]!
-                        );
-                    }
-                    currentStroke.current[hand.handedness]!.points.push({
-                        x: midX,
-                        y: midY,
-                    });
+
+                    strokes.current.push(
+                        currentStroke.current[hand.handedness]!
+                    );
                 }
+
+                // Append the current point to the active stroke.
+
+                currentStroke.current[hand.handedness]!.points.push({
+                    x: midX,
+
+                    y: midY,
+                });
+            } else {
+                // Finalize the stroke for this hand.
+
+                currentStroke.current[hand.handedness] = null;
+            }
+
+            // --- Stroke Drawing Logic ---
+            if (isPinching) {
+                if (
+                    pinchPrevPosRef.current["Left"] != null &&
+                    pinchPrevPosRef.current["Right"] != null
+                ) {
+                    // Both hands are holding: determine zoom using the dual pinch distance.
+                    if (
+                        hand.handedness === "Right" &&
+                        typeof onZoom === "function"
+                    ) {
+                        const leftPos = pinchPrevPosRef.current["Left"]!;
+                        const rightPos = pinchPrevPosRef.current["Right"]!;
+                        const currentDistance = Math.sqrt(
+                            Math.pow(leftPos.x - rightPos.x, 2) +
+                                Math.pow(leftPos.y - rightPos.y, 2)
+                        );
+                        if (previousPinchDistanceRef.current === null) {
+                            // Initialize the baseline distance for this new gesture.
+                            previousPinchDistanceRef.current = currentDistance;
+                        } else {
+                            const zoomDelta =
+                                currentDistance -
+                                previousPinchDistanceRef.current;
+                            onZoom(zoomDelta);
+                            previousPinchDistanceRef.current = currentDistance;
+                        }
+                    }
+                } else {
+                    // Reset the dual–pinch zoom ref when both hands are not holding.
+                    previousPinchDistanceRef.current = null;
+                    if (isRotate && typeof onPinchMove === "function") {
+                        const prevPos =
+                            pinchPrevPosRef.current[hand.handedness];
+                        if (prevPos) {
+                            const rawDeltaX = midX - prevPos.x;
+                            const rawDeltaY = midY - prevPos.y;
+                            const pinchSmoothingFactor = 0.15; // Lower smoothing factor for smoother movement.
+
+                            let smoothedDelta = {
+                                deltaX: rawDeltaX,
+                                deltaY: rawDeltaY,
+                            };
+                            const prevSmoothed =
+                                pinchDeltaSmoothingRef.current[hand.handedness];
+                            if (prevSmoothed) {
+                                smoothedDelta = {
+                                    deltaX:
+                                        prevSmoothed.deltaX *
+                                            (1 - pinchSmoothingFactor) +
+                                        rawDeltaX * pinchSmoothingFactor,
+                                    deltaY:
+                                        prevSmoothed.deltaY *
+                                            (1 - pinchSmoothingFactor) +
+                                        rawDeltaY * pinchSmoothingFactor,
+                                };
+                            }
+                            pinchDeltaSmoothingRef.current[hand.handedness] =
+                                smoothedDelta;
+                            onPinchMove(
+                                hand.handedness,
+                                smoothedDelta.deltaX,
+                                smoothedDelta.deltaY
+                            );
+                        }
+                    }
+                }
+                // Update the previous pinch position for the current hand.
+                pinchPrevPosRef.current[hand.handedness] = { x: midX, y: midY };
             } else {
                 currentStroke.current[hand.handedness] = null;
                 pinchPrevPosRef.current[hand.handedness] = null;
@@ -339,7 +426,7 @@ function useSkeleton({
             }
             ctx.restore();
         },
-        [debug, overlayCanvasRef, onPinchMove]
+        [debug, overlayCanvasRef, onPinchMove, onZoom]
     );
 
     // Draw each stroke separately from the global strokes array.

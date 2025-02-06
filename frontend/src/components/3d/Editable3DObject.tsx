@@ -5,18 +5,45 @@ interface Editable3DObjectProps {
     rotation: { x: number; y: number; z: number };
     zoom?: number; // new optional zoom prop
     onRotationChange?: (rotation: { x: number; y: number; z: number }) => void; // new callback prop for mouse rotation
+    onZoomChange?: (newZoom: number) => void; // new callback prop for zoom change
+    leftHandCursor: { x: number; y: number };
+    rightHandCursor: { x: number; y: number };
 }
 
 function Editable3DObject({
     rotation,
     zoom,
     onRotationChange,
+    onZoomChange,
+    leftHandCursor,
+    rightHandCursor,
 }: Editable3DObjectProps) {
     const mountRef = useRef<HTMLDivElement | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>();
     const cameraRef = useRef<THREE.PerspectiveCamera>();
     const sceneRef = useRef<THREE.Scene>();
     const mainGroupRef = useRef<THREE.Group>();
+    // New refs for pointer tracking and corner marker storage.
+    const pointerRef = useRef(new THREE.Vector2(0, 0));
+    const cornerMarkersRef = useRef<THREE.Mesh[]>([]);
+
+    // Refs to store hand cursor positions.
+    const leftHandCursorRef = useRef<THREE.Vector2 | undefined>(
+        new THREE.Vector2(leftHandCursor.x, leftHandCursor.y)
+    );
+    const rightHandCursorRef = useRef<THREE.Vector2 | undefined>(
+        new THREE.Vector2(rightHandCursor.x, rightHandCursor.y)
+    );
+    useEffect(() => {
+        leftHandCursorRef.current = new THREE.Vector2(
+            leftHandCursor.x,
+            leftHandCursor.y
+        );
+        rightHandCursorRef.current = new THREE.Vector2(
+            rightHandCursor.x,
+            rightHandCursor.y
+        );
+    }, [leftHandCursor, rightHandCursor]);
 
     useEffect(() => {
         if (!mountRef.current) return;
@@ -64,17 +91,19 @@ function Editable3DObject({
                 new THREE.Vector3(max.x, max.y, min.z),
                 new THREE.Vector3(max.x, max.y, max.z),
             ];
-            const markerMaterial = new THREE.MeshBasicMaterial({
-                color: 0x0000ff,
-            });
-            // For each corner, create a small sphere marker.
+            // For each corner, create a small sphere marker with its own material.
             corners.forEach((corner) => {
+                const markerMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x0000ff,
+                });
                 const marker = new THREE.Mesh(
                     new THREE.SphereGeometry(0.05, 8, 8),
                     markerMaterial
                 );
                 marker.position.copy(corner);
                 mesh.add(marker);
+                // Store the marker for later raycasting.
+                cornerMarkersRef.current.push(marker);
             });
         };
         const geometry = new THREE.BoxGeometry();
@@ -115,8 +144,77 @@ function Editable3DObject({
         mainGroupRef.current = mainGroup;
         scene.add(mainGroup);
 
+        const raycaster = new THREE.Raycaster();
         const animate = () => {
             requestAnimationFrame(animate);
+            // Convert raw hand cursor coordinates (in pixels) to normalized device coordinates.
+            if (mountRef.current) {
+                const rect = mountRef.current.getBoundingClientRect();
+                if (leftHandCursor) {
+                    leftHandCursorRef.current?.set(
+                        (leftHandCursor.x / rect.width) * 2 - 1,
+                        -((leftHandCursor.y - rect.top) / rect.height) * 2 + 1
+                    );
+                }
+                if (rightHandCursor) {
+                    rightHandCursorRef.current?.set(
+                        (rightHandCursor.x / rect.width) * 2 - 1,
+                        -((rightHandCursor.y - rect.top) / rect.height) * 2 + 1
+                    );
+                }
+            }
+
+            const hoveredMarkers = new Set<THREE.Object3D>();
+            const pointers: THREE.Vector2[] = [];
+            // Always include the mouse pointer.
+            pointers.push(pointerRef.current);
+            // Include normalized hand cursor pointers if available.
+            if (leftHandCursorRef.current)
+                pointers.push(leftHandCursorRef.current);
+            if (rightHandCursorRef.current)
+                pointers.push(rightHandCursorRef.current);
+
+            pointers.forEach((pointer) => {
+                raycaster.setFromCamera(pointer, camera);
+                const intersects = raycaster.intersectObjects(
+                    cornerMarkersRef.current,
+                    false
+                );
+                intersects.forEach((intersect) =>
+                    hoveredMarkers.add(intersect.object)
+                );
+            });
+
+            // Highlight only the closest marker among all pointers if within tolerance.
+            const TOLERANCE = 0.1 * (zoom || 1);
+            let closestMarker: THREE.Mesh | null = null;
+            let minDistance = Infinity;
+            pointers.forEach((pointer) => {
+                cornerMarkersRef.current.forEach((marker) => {
+                    const markerWorldPos = new THREE.Vector3();
+                    marker.getWorldPosition(markerWorldPos);
+                    markerWorldPos.project(camera);
+                    const markerPos2D = new THREE.Vector2(
+                        markerWorldPos.x,
+                        markerWorldPos.y
+                    );
+                    const distance = pointer.distanceTo(markerPos2D);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestMarker = marker;
+                    }
+                });
+            });
+
+            cornerMarkersRef.current.forEach((marker) => {
+                const material = marker.material as THREE.MeshBasicMaterial;
+                if (marker === closestMarker && minDistance < TOLERANCE) {
+                    material.color.set(0xffff00); // Highlight closest marker.
+                } else {
+                    material.color.set(0x0000ff); // Default blue.
+                }
+            });
+
             renderer.render(scene, camera);
         };
         animate();
@@ -166,7 +264,17 @@ function Editable3DObject({
         };
 
         const onMouseMove = (e: MouseEvent) => {
-            if (!isDragging.current) return;
+            // Update pointer for raycasting.
+            const rect = element.getBoundingClientRect();
+            pointerRef.current.x =
+                ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            pointerRef.current.y =
+                -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+            if (!isDragging.current) {
+                return;
+            }
+
             const dx = e.clientX - lastMousePosition.x;
             const dy = e.clientY - lastMousePosition.y;
             const sensitivity = 0.005; // Adjust sensitivity as needed.
@@ -210,6 +318,11 @@ function Editable3DObject({
                 let newZoom = currentZoom - e.deltaY * sensitivity;
                 // Clamp the zoom level between 0.5 and 5.
                 newZoom = Math.max(0.5, Math.min(5, newZoom));
+                // Propagate the new zoom to the parent.
+                if (onZoomChange) {
+                    onZoomChange(newZoom);
+                }
+                // Optionally update the group's scale immediately.
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
             }
         };
@@ -222,7 +335,7 @@ function Editable3DObject({
             element.removeEventListener("mouseleave", onMouseUp);
             element.removeEventListener("wheel", onWheel);
         };
-    }, [onRotationChange]);
+    }, [onRotationChange, onZoomChange]);
 
     return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
 }

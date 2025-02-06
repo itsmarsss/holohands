@@ -277,35 +277,7 @@ function useSkeleton({
             );
             previousPointerAngle.current = pointerAngle;
 
-            if (isHolding) {
-                // If no active stroke exists for this hand, create one and add it to the global strokes array.
-
-                if (!currentStroke.current[hand.handedness]) {
-                    currentStroke.current[hand.handedness] = {
-                        hand: hand.handedness,
-
-                        color: HAND_COLORS[hand.handedness],
-
-                        points: [],
-                    };
-
-                    strokes.current.push(
-                        currentStroke.current[hand.handedness]!
-                    );
-                }
-
-                // Append the current point to the active stroke.
-
-                currentStroke.current[hand.handedness]!.points.push({
-                    x: midX,
-
-                    y: midY,
-                });
-            } else {
-                // Finalize the stroke for this hand.
-
-                currentStroke.current[hand.handedness] = null;
-            }
+            let action = false;
 
             // --- Stroke Drawing Logic ---
             if (isPinching) {
@@ -333,6 +305,7 @@ function useSkeleton({
                                 previousPinchDistanceRef.current;
                             onZoom(zoomDelta);
                             previousPinchDistanceRef.current = currentDistance;
+                            action = true;
                         }
                     }
                 } else {
@@ -371,6 +344,7 @@ function useSkeleton({
                                 smoothedDelta.deltaX,
                                 smoothedDelta.deltaY
                             );
+                            action = true;
                         }
                     }
                 }
@@ -380,6 +354,36 @@ function useSkeleton({
                 currentStroke.current[hand.handedness] = null;
                 pinchPrevPosRef.current[hand.handedness] = null;
                 pinchDeltaSmoothingRef.current[hand.handedness] = null;
+            }
+
+            if (isHolding && !action) {
+                // If no active stroke exists for this hand, create one and add it to the global strokes array.
+
+                if (!currentStroke.current[hand.handedness]) {
+                    currentStroke.current[hand.handedness] = {
+                        hand: hand.handedness,
+
+                        color: HAND_COLORS[hand.handedness],
+
+                        points: [],
+                    };
+
+                    strokes.current.push(
+                        currentStroke.current[hand.handedness]!
+                    );
+                }
+
+                // Append the current point to the active stroke.
+
+                currentStroke.current[hand.handedness]!.points.push({
+                    x: midX,
+
+                    y: midY,
+                });
+            } else {
+                // Finalize the stroke for this hand.
+
+                currentStroke.current[hand.handedness] = null;
             }
 
             // --- Compute and display additional hand angles ---

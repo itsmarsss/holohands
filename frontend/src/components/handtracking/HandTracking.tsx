@@ -352,6 +352,9 @@ function HandTracking() {
                 rotation={objectRotation}
                 zoom={objectZoom}
                 onRotationChange={setObjectRotation}
+                onZoomChange={setObjectZoom}
+                leftHandCursor={leftCursorCoords.current}
+                rightHandCursor={rightCursorCoords.current}
             />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             {/* Render left cursor if left hand is detected */}

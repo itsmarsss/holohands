@@ -45,12 +45,18 @@ interface UseSkeletonProps {
         targetX: number,
         targetY: number
     ) => void;
+    onPinchMove?: (
+        handedness: "Left" | "Right",
+        deltaX: number,
+        deltaY: number
+    ) => void;
 }
 
 function useSkeleton({
     overlayCanvasRef,
     debug = false,
     updateCursorPosition,
+    onPinchMove,
 }: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
 
@@ -62,8 +68,25 @@ function useSkeleton({
         Right: null,
     });
 
-    const distanceHistory = useRef<number[]>([]);
-    const historyTime = useRef<number[]>([]);
+    // Add pinch start tracking for each hand for a new hold detection system.
+    const pinchStartRef = useRef<Record<"Left" | "Right", number | null>>({
+        Left: null,
+        Right: null,
+    });
+    // New ref to track the previous pinch position for delta computation.
+    const pinchPrevPosRef = useRef<
+        Record<"Left" | "Right", { x: number; y: number } | null>
+    >({
+        Left: null,
+        Right: null,
+    });
+    // New ref to store smoothed pinch delta for each hand.
+    const pinchDeltaSmoothingRef = useRef<
+        Record<"Left" | "Right", { deltaX: number; deltaY: number } | null>
+    >({
+        Left: null,
+        Right: null,
+    });
     const smoothingFactor = 0.5;
 
     const drawHand = useCallback(
@@ -128,7 +151,7 @@ function useSkeleton({
             ctx.lineTo(thumb[0] * scaleX, thumb[1] * scaleY);
             ctx.stroke();
 
-            // Compute and display index-thumb distance and holding state.
+            // --- Improved Hold (Pinch) Detection Logic ---
             const distanceIndexThumb = computeDistance(
                 indexFinger,
                 thumb,
@@ -136,27 +159,8 @@ function useSkeleton({
                 scaleY
             );
             const currentTime = Date.now();
-            distanceHistory.current.push(distanceIndexThumb);
-            historyTime.current.push(currentTime);
-            // Remove old history entries (> 200ms)
-            while (
-                historyTime.current.length > 0 &&
-                currentTime - historyTime.current[0] > 200
-            ) {
-                distanceHistory.current.shift();
-                historyTime.current.shift();
-            }
-            const movingAverage =
-                distanceHistory.current.reduce((sum, val) => sum + val, 0) /
-                distanceHistory.current.length;
-            const variance =
-                distanceHistory.current.reduce(
-                    (sum, val) => sum + Math.pow(val - movingAverage, 2),
-                    0
-                ) / distanceHistory.current.length;
-            const stdDev = Math.sqrt(variance);
 
-            // Compute hand spread to determine a relative threshold.
+            // Compute hand spread to determine a relative pinch threshold.
             const xValues = hand.landmarks.map((lm) => lm[0]);
             const yValues = hand.landmarks.map((lm) => lm[1]);
             const avgDistance =
@@ -165,56 +169,52 @@ function useSkeleton({
                     Math.max(...yValues) -
                     Math.min(...yValues)) /
                 2;
-            // Use relative thresholds based on hand spread.
-            const touchThreshold = 0.5 * avgDistance;
-            const stabilityThreshold = 0.05 * avgDistance;
-            const isHolding =
-                movingAverage < touchThreshold && stdDev < stabilityThreshold;
+            const pinchThreshold = 0.35 * avgDistance;
 
+            let isHolding = false;
+            if (distanceIndexThumb < pinchThreshold) {
+                if (!pinchStartRef.current[hand.handedness]) {
+                    pinchStartRef.current[hand.handedness] = currentTime;
+                } else if (
+                    currentTime - pinchStartRef.current[hand.handedness]! >
+                    100
+                ) {
+                    isHolding = true;
+                }
+            } else {
+                pinchStartRef.current[hand.handedness] = null;
+                isHolding = false;
+            }
+
+            // Determine mode: rotation if thumb, index and middle finger are together.
+            // Compute the distance between the index and middle finger.
+            const middleFinger = hand.landmarks[12];
+            const distanceIndexMiddle = computeDistance(
+                indexFinger,
+                middleFinger,
+                scaleX,
+                scaleY
+            );
+            // Use the same threshold for simplicity.
+            const isRotate = distanceIndexMiddle < pinchThreshold;
+
+            // Display mode information in debug text.
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "16px Arial";
             if (debug) {
                 ctx.fillText(
-                    `Distance: ${distanceIndexThumb.toFixed(2)} px`,
+                    `Distance: ${distanceIndexThumb.toFixed(
+                        2
+                    )} px, Threshold: ${pinchThreshold.toFixed(2)} px`,
                     midX,
                     midY - 10
                 );
             }
-            ctx.fillText(isHolding ? "+" : "-", midX + 20, midY + 10);
-
-            // Compute and display palm angle.
-            const wrist = hand.landmarks[0];
-            const middleFinger = hand.landmarks[12];
-            const palmAngle =
-                (Math.atan2(
-                    middleFinger[1] - wrist[1],
-                    middleFinger[0] - wrist[0]
-                ) *
-                    180) /
-                Math.PI;
-            if (debug) {
-                ctx.fillText(
-                    `Palm Angle: ${palmAngle.toFixed(2)}°`,
-                    wrist[0] * scaleX,
-                    wrist[1] * scaleY - 10
-                );
-            }
-
-            // Compute and display index-thumb angle.
-            const indexThumbAngle =
-                (Math.atan2(
-                    indexFinger[1] - thumb[1],
-                    indexFinger[0] - thumb[0]
-                ) *
-                    180) /
-                Math.PI;
-            if (debug) {
-                ctx.fillText(
-                    `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
-                    indexFinger[0] * scaleX,
-                    indexFinger[1] * scaleY - 30
-                );
-            }
+            ctx.fillText(
+                isRotate ? "Rotating" : "Drawing",
+                midX + 20,
+                midY + 10
+            );
 
             // Smooth pointer angle and update cursor position.
             const currentPointerAngle =
@@ -231,27 +231,100 @@ function useSkeleton({
             );
             previousPointerAngle.current = pointerAngle;
 
-            // --- Stroke Drawing Logic (for separate strokes in one array) ---
+            // --- Stroke Drawing Logic ---
             if (isHolding) {
-                // If no active stroke exists for this hand, create one and add it to the global strokes array.
-                if (!currentStroke.current[hand.handedness]) {
-                    currentStroke.current[hand.handedness] = {
-                        hand: hand.handedness,
-                        color: HAND_COLORS[hand.handedness],
-                        points: [],
+                if (isRotate && typeof onPinchMove === "function") {
+                    // --- Rotation mode: trigger onPinchMove with smoothed delta ---
+                    const prevPos = pinchPrevPosRef.current[hand.handedness];
+                    if (prevPos) {
+                        const rawDeltaX = midX - prevPos.x;
+                        const rawDeltaY = midY - prevPos.y;
+                        const pinchSmoothingFactor = 0.2; // Adjust sensitivity as needed
+
+                        let smoothedDelta = {
+                            deltaX: rawDeltaX,
+                            deltaY: rawDeltaY,
+                        };
+                        const prevSmoothed =
+                            pinchDeltaSmoothingRef.current[hand.handedness];
+                        if (prevSmoothed) {
+                            smoothedDelta = {
+                                deltaX:
+                                    prevSmoothed.deltaX *
+                                        (1 - pinchSmoothingFactor) +
+                                    rawDeltaX * pinchSmoothingFactor,
+                                deltaY:
+                                    prevSmoothed.deltaY *
+                                        (1 - pinchSmoothingFactor) +
+                                    rawDeltaY * pinchSmoothingFactor,
+                            };
+                        }
+                        pinchDeltaSmoothingRef.current[hand.handedness] =
+                            smoothedDelta;
+                        onPinchMove(
+                            hand.handedness,
+                            smoothedDelta.deltaX,
+                            smoothedDelta.deltaY
+                        );
+                    }
+                    // Update the previous pinch position for rotation mode.
+                    pinchPrevPosRef.current[hand.handedness] = {
+                        x: midX,
+                        y: midY,
                     };
-                    strokes.current.push(
-                        currentStroke.current[hand.handedness]!
-                    );
+                } else {
+                    // --- Drawing mode: update stroke drawing logic ---
+                    if (!currentStroke.current[hand.handedness]) {
+                        currentStroke.current[hand.handedness] = {
+                            hand: hand.handedness,
+                            color: HAND_COLORS[hand.handedness],
+                            points: [],
+                        };
+                        strokes.current.push(
+                            currentStroke.current[hand.handedness]!
+                        );
+                    }
+                    currentStroke.current[hand.handedness]!.points.push({
+                        x: midX,
+                        y: midY,
+                    });
                 }
-                // Append the current point to the active stroke.
-                currentStroke.current[hand.handedness]!.points.push({
-                    x: midX,
-                    y: midY,
-                });
             } else {
-                // Finalize the stroke for this hand.
                 currentStroke.current[hand.handedness] = null;
+                pinchPrevPosRef.current[hand.handedness] = null;
+                pinchDeltaSmoothingRef.current[hand.handedness] = null;
+            }
+
+            // --- Compute and display additional hand angles ---
+            const wrist = hand.landmarks[0];
+            const palmAngle =
+                (Math.atan2(
+                    middleFinger[1] - wrist[1],
+                    middleFinger[0] - wrist[0]
+                ) *
+                    180) /
+                Math.PI;
+            if (debug) {
+                ctx.fillText(
+                    `Palm Angle: ${palmAngle.toFixed(2)}°`,
+                    wrist[0] * scaleX,
+                    wrist[1] * scaleY - 10
+                );
+            }
+
+            const indexThumbAngle =
+                (Math.atan2(
+                    indexFinger[1] - thumb[1],
+                    indexFinger[0] - thumb[0]
+                ) *
+                    180) /
+                Math.PI;
+            if (debug) {
+                ctx.fillText(
+                    `Index-Thumb Angle: ${indexThumbAngle.toFixed(2)}°`,
+                    indexFinger[0] * scaleX,
+                    indexFinger[1] * scaleY - 30
+                );
             }
 
             // Draw detected symbols if available.
@@ -266,7 +339,7 @@ function useSkeleton({
             }
             ctx.restore();
         },
-        [debug, overlayCanvasRef]
+        [debug, overlayCanvasRef, onPinchMove]
     );
 
     // Draw each stroke separately from the global strokes array.

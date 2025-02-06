@@ -11,8 +11,9 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
     // Use a WeakMap to track hover state per button element without relying on button IDs.
     const hoverState = useRef(new WeakMap<Element, boolean>());
-    // Track when the button started being hovered.
+    // Instead, we now track the hover start time and also store the timer IDs
     const hoverStartTimes = useRef(new WeakMap<Element, number>());
+    const hoverTimers = useRef(new WeakMap<Element, number>());
     // Ref for the circular progress SVG circle.
     const progressRef = useRef<SVGCircleElement>(null);
 
@@ -65,27 +66,33 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                     absoluteCursorY >= rect.top - toleranceY &&
                     absoluteCursorY <= rect.bottom + toleranceY;
 
-                const wasHovered = hoverState.current.get(button) || false;
+                // const wasHovered = hoverState.current.get(button) || false;
                 if (isHovering) {
-                    if (!wasHovered) {
+                    // If not already hovered, start hover detection.
+                    if (!hoverStartTimes.current.has(button)) {
                         button.classList.add("simulated-hover");
-                        hoverState.current.set(button, true);
-                        // Start the hover timer.
-                        hoverStartTimes.current.set(button, Date.now());
-                    } else {
-                        // Already in a hovered state; check duration.
-                        const startTime = hoverStartTimes.current.get(button);
-                        if (startTime && Date.now() - startTime >= 500) {
-                            // Trigger the click if hovered more than 500ms.
-                            (button as HTMLButtonElement).click();
-                            // Remove the timer to prevent repeated clicks.
+                        const startTime = Date.now();
+                        hoverStartTimes.current.set(button, startTime);
+                        // Start a timer that triggers a click after 500ms if still hovered.
+                        const timerId = window.setTimeout(() => {
+                            // Only click if still hovered (i.e. if class still present)
+                            if (button.classList.contains("simulated-hover")) {
+                                (button as HTMLButtonElement).click();
+                            }
+                            hoverTimers.current.delete(button);
                             hoverStartTimes.current.delete(button);
-                        }
+                        }, 1000);
+                        hoverTimers.current.set(button, timerId);
                     }
                 } else {
-                    if (wasHovered) {
+                    if (hoverStartTimes.current.has(button)) {
                         button.classList.remove("simulated-hover");
-                        hoverState.current.set(button, false);
+                        // Cancel the timer if the cursor leaves the button area.
+                        const timerId = hoverTimers.current.get(button);
+                        if (timerId) {
+                            clearTimeout(timerId);
+                        }
+                        hoverTimers.current.delete(button);
                         hoverStartTimes.current.delete(button);
                     }
                 }
@@ -97,7 +104,7 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                 const startTime = hoverStartTimes.current.get(button);
                 if (startTime) {
                     const progress = Math.min(
-                        (Date.now() - startTime) / 500,
+                        (Date.now() - startTime) / 1000,
                         1
                     );
                     if (progress > maxProgress) {

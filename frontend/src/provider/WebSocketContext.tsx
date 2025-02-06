@@ -99,5 +99,9 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
 };
 
 export const useWebSocket = () => {
-    return useContext(WebSocketContext);
+    const context = useContext(WebSocketContext);
+    if (!context) {
+        throw new Error("useWebSocket must be used within a WebSocketProvider");
+    }
+    return context;
 };

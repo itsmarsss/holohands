@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Controls from "../controls/Controls";
 import "./HandTracking.css";
 import Editable3DObject from "../3d/Editable3DObject";
-import useVideoStream from "../../hooks/useVideoStream";
 import { Hand } from "../../objects/hand";
-import { useWebSocket } from "../../provider/WebSocketContext";
 import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
 import ButtonColumn from "../buttoncolumn/ButtonColumn";
@@ -12,17 +10,10 @@ import Cursor from "../cursor/Cursor";
 import { useDebug } from "../../provider/DebugContext";
 import { toast } from "react-toastify";
 import { Device } from "../../objects/device";
+import { useWebSocket } from "../../provider/WebSocketContext";
+import { useVideoStream } from "../../provider/VideoStreamContext";
 
 function HandTracking() {
-    const {
-        videoRef,
-        startStream,
-        stopStream,
-        captureFrame,
-        getAvailableCameras,
-        streamStatus,
-    } = useVideoStream();
-
     const [frame, setFrame] = useState<string | null>(null);
     const [fps, setFps] = useState<number>(0);
     const frameCount = useRef<number>(0);
@@ -67,11 +58,31 @@ function HandTracking() {
         }
     };
 
-    // Pass the debug flag to the useSkeleton hook.
+    // New state for 3D object rotation (angles in degrees)
+    const [objectRotation, setObjectRotation] = useState({ x: 0, y: 0, z: 0 });
+
+    // Define onPinchMove callback to update 3D object rotation.
+    const handlePinchMove = useCallback(
+        (handedness: "Left" | "Right", deltaX: number, deltaY: number) => {
+            // For example, only update rotation for the right hand.
+            if (handedness === "Right") {
+                const rotationFactor = 0.01; // adjust sensitivity as needed
+                setObjectRotation((prev) => ({
+                    x: prev.x + deltaY * rotationFactor,
+                    y: prev.y + deltaX * rotationFactor,
+                    z: prev.z,
+                }));
+            }
+        },
+        []
+    );
+
+    // Pass the new onPinchMove callback into useSkeleton along with updateCursorPosition.
     const { drawHand, drawStrokes } = useSkeleton({
         overlayCanvasRef,
         debug,
         updateCursorPosition,
+        onPinchMove: handlePinchMove,
     });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
@@ -87,8 +98,15 @@ function HandTracking() {
     const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
     const webSocketContext = useWebSocket();
-    const status = webSocketContext?.status;
+    const webSocketStatus = webSocketContext?.status;
     const websocket = webSocketContext?.websocket;
+
+    const videoStreamContext = useVideoStream();
+    const videoStreamStatus = videoStreamContext?.status;
+    const captureFrame = videoStreamContext?.captureFrame;
+    const getAvailableCameras = videoStreamContext?.getAvailableCameras;
+    const setActiveCamera = videoStreamContext?.setActiveCamera;
+    const videoRef = videoStreamContext?.videoRef;
 
     const [leftButtonColumnPeek, setLeftButtonColumnPeek] = useState(false);
     const [rightButtonColumnPeek, setRightButtonColumnPeek] = useState(false);
@@ -146,7 +164,7 @@ function HandTracking() {
         if (device) {
             setSelectedDevice(device);
             toast.info(`Using ${device.label}`);
-            startStream(device.deviceId);
+            setActiveCamera(device.deviceId);
         }
     };
 
@@ -165,20 +183,16 @@ function HandTracking() {
                     deviceId: defaultDeviceId,
                     label: cameras[0].label,
                 });
-                startStream(defaultDeviceId);
+                setActiveCamera(defaultDeviceId);
             } else {
                 console.error("No cameras available");
             }
         });
-
-        return () => {
-            stopStream();
-        };
     }, []);
 
     useEffect(() => {
         console.log("Frame:", frame?.length);
-        if (frame && streamStatus === "streaming") {
+        if (frame && videoStreamStatus === "streaming") {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 const payload = JSON.stringify({ image: frame });
                 websocket.send(payload);
@@ -191,11 +205,11 @@ function HandTracking() {
         } else {
             console.log("No frame to send.");
         }
-    }, [frame, streamStatus, websocket]);
+    }, [frame, videoStreamStatus, websocket]);
 
     // Updated effect: new frame is captured only when previous one is acknowledged.
     useEffect(() => {
-        if (acknowledged && streamStatus === "streaming") {
+        if (acknowledged && videoStreamStatus === "streaming") {
             const capturedFrame = captureFrame();
             if (capturedFrame?.length && capturedFrame.length > 100) {
                 console.log("Captured frame:", capturedFrame.length);
@@ -215,7 +229,7 @@ function HandTracking() {
             }
         }, 1000);
         return () => clearTimeout(fallbackTimeout);
-    }, [acknowledged, streamStatus, captureFrame]);
+    }, [acknowledged, videoStreamStatus, captureFrame]);
 
     const resizeCanvases = useCallback(() => {
         const overlayCanvas = overlayCanvasRef.current;
@@ -313,10 +327,10 @@ function HandTracking() {
     return (
         <div ref={containerRef} className="handtracking-container">
             {/* Display the WebSocket connection status */}
-            <div className="connection-status">{status}</div>
+            <div className="connection-status">{webSocketStatus}</div>
             {debug && <div className="fps-display">{fps} FPS</div>}
             <Controls currentHandsData={currentHandsData} />
-            <Editable3DObject />
+            <Editable3DObject rotation={objectRotation} />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             <video
                 ref={videoRef}

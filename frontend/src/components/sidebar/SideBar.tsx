@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import "./SideBar.css";
 import { useDebug } from "../../provider/DebugContext";
+import MiniDisplay from "../minidisplay/MiniDisplay";
 const SideBar: React.FC = () => {
     const [isExtended, setIsExtended] = useState(true); // State to manage sidebar visibility
 
@@ -40,6 +41,7 @@ const SideBar: React.FC = () => {
                             Debug
                         </label>
                     </div>
+                    <MiniDisplay />
                 </div>
             </div>
         </>

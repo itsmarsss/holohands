@@ -3,9 +3,9 @@ import * as THREE from "three";
 
 interface Editable3DObjectProps {
     rotation: { x: number; y: number; z: number };
-    zoom?: number; // new optional zoom prop
-    onRotationChange?: (rotation: { x: number; y: number; z: number }) => void; // new callback prop for mouse rotation
-    onZoomChange?: (newZoom: number) => void; // new callback prop for zoom change
+    zoom?: number; // optional zoom prop
+    onRotationChange?: (rotation: { x: number; y: number; z: number }) => void;
+    onZoomChange?: (newZoom: number) => void;
     leftHandCursor: { x: number; y: number };
     rightHandCursor: { x: number; y: number };
 }
@@ -23,15 +23,17 @@ function Editable3DObject({
     const cameraRef = useRef<THREE.PerspectiveCamera>();
     const sceneRef = useRef<THREE.Scene>();
     const mainGroupRef = useRef<THREE.Group>();
-    // New refs for pointer tracking and corner marker storage.
+
+    // Global refs for pointer and hand cursors.
     const pointerRef = useRef(new THREE.Vector2(0, 0));
     const cornerMarkersRef = useRef<THREE.Mesh[]>([]);
+    // New ref to track the hovered marker.
+    const hoveredMarkerRef = useRef<THREE.Mesh | null>(null);
 
-    // Refs to store hand cursor positions.
-    const leftHandCursorRef = useRef<THREE.Vector2 | undefined>(
+    const leftHandCursorRef = useRef<THREE.Vector2>(
         new THREE.Vector2(leftHandCursor.x, leftHandCursor.y)
     );
-    const rightHandCursorRef = useRef<THREE.Vector2 | undefined>(
+    const rightHandCursorRef = useRef<THREE.Vector2>(
         new THREE.Vector2(rightHandCursor.x, rightHandCursor.y)
     );
     useEffect(() => {
@@ -45,10 +47,165 @@ function Editable3DObject({
         );
     }, [leftHandCursor, rightHandCursor]);
 
+    // Refs used for dragging a marker.
+    const activeMarkerRef = useRef<THREE.Mesh | null>(null);
+    const dragOffsetRef = useRef(new THREE.Vector3());
+    const dragPlaneRef = useRef<THREE.Plane | null>(null);
+
+    // ────────────────────────────────────────────────────────────────
+    // Utility functions to create and update our editable cube:
+    // ────────────────────────────────────────────────────────────────
+
+    // Creates a BufferGeometry for a hexahedron given eight vertices.
+    const createHexahedronGeometry = (
+        vertices: THREE.Vector3[]
+    ): THREE.BufferGeometry => {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array([
+            vertices[0].x,
+            vertices[0].y,
+            vertices[0].z,
+            vertices[1].x,
+            vertices[1].y,
+            vertices[1].z,
+            vertices[2].x,
+            vertices[2].y,
+            vertices[2].z,
+            vertices[3].x,
+            vertices[3].y,
+            vertices[3].z,
+            vertices[4].x,
+            vertices[4].y,
+            vertices[4].z,
+            vertices[5].x,
+            vertices[5].y,
+            vertices[5].z,
+            vertices[6].x,
+            vertices[6].y,
+            vertices[6].z,
+            vertices[7].x,
+            vertices[7].y,
+            vertices[7].z,
+        ]);
+        geometry.setAttribute(
+            "position",
+            new THREE.BufferAttribute(positions, 3)
+        );
+        // Define faces (two triangles per face).
+        const indices = [
+            // Face 1: “min x” face: markers 0,1,3,2
+            0, 1, 3, 0, 3, 2,
+            // Face 2: “max x” face: markers 4,6,7,5
+            4, 6, 7, 4, 7, 5,
+            // Face 3: “min y” face: markers 0,4,5,1
+            0, 4, 5, 0, 5, 1,
+            // Face 4: “max y” face: markers 2,3,7,6
+            2, 3, 7, 2, 7, 6,
+            // Face 5: “min z” face: markers 0,2,6,4
+            0, 2, 6, 0, 6, 4,
+            // Face 6: “max z” face: markers 1,5,7,3
+            1, 5, 7, 1, 7, 3,
+        ];
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        return geometry;
+    };
+
+    // Rebuild the face geometry of a cube from its corner markers.
+    const updateCubeGeometry = (faceMesh: THREE.Mesh) => {
+        const markers = faceMesh.children.filter(
+            (child) => child.userData.isCornerMarker
+        );
+        if (markers.length !== 8) return; // safety check
+        // Sort markers by their stored corner index.
+        markers.sort((a, b) => a.userData.cornerIndex - b.userData.cornerIndex);
+        const vertices = markers.map((marker) => marker.position.clone());
+        const newGeometry = createHexahedronGeometry(vertices);
+        faceMesh.geometry.dispose();
+        faceMesh.geometry = newGeometry;
+    };
+
+    // Create an editable cube as a group.
+    const createEditableCube = (offset: THREE.Vector3, faceColor: number) => {
+        // Define initial cube bounds.
+        const min = new THREE.Vector3(-0.5, -0.5, -0.5);
+        const max = new THREE.Vector3(0.5, 0.5, 0.5);
+        // Create the eight corner vertices in a fixed order.
+        const v0 = new THREE.Vector3(min.x, min.y, min.z);
+        const v1 = new THREE.Vector3(min.x, min.y, max.z);
+        const v2 = new THREE.Vector3(min.x, max.y, min.z);
+        const v3 = new THREE.Vector3(min.x, max.y, max.z);
+        const v4 = new THREE.Vector3(max.x, min.y, min.z);
+        const v5 = new THREE.Vector3(max.x, min.y, max.z);
+        const v6 = new THREE.Vector3(max.x, max.y, min.z);
+        const v7 = new THREE.Vector3(max.x, max.y, max.z);
+        const vertices = [v0, v1, v2, v3, v4, v5, v6, v7];
+
+        // Build the initial geometry.
+        const geometry = createHexahedronGeometry(vertices);
+
+        // Create the face mesh.
+        const faceMaterial = new THREE.MeshBasicMaterial({
+            color: faceColor,
+            opacity: 0.5,
+            transparent: true,
+        });
+        const faceMesh = new THREE.Mesh(geometry.clone(), faceMaterial);
+        faceMesh.name = "faceMesh";
+
+        // Add eight corner markers to the face mesh.
+        for (let i = 0; i < 8; i++) {
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: 0x0000ff,
+            });
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(0.05, 8, 8),
+                markerMaterial
+            );
+            // Place the marker at the corresponding vertex.
+            marker.position.copy(vertices[i]);
+            marker.userData.isCornerMarker = true;
+            marker.userData.cornerIndex = i;
+            faceMesh.add(marker);
+            // Also add to our global marker list (for raycasting).
+            cornerMarkersRef.current.push(marker);
+        }
+
+        // Create a wireframe mesh from the same geometry.
+        const wireframeGeom = new THREE.WireframeGeometry(geometry.clone());
+        const wireframeMaterial = new THREE.LineBasicMaterial({
+            color: 0x000000,
+        });
+        const wireframeMesh = new THREE.LineSegments(
+            wireframeGeom,
+            wireframeMaterial
+        );
+        wireframeMesh.name = "wireframeMesh";
+
+        // Group the face mesh and the wireframe.
+        const cubeGroup = new THREE.Group();
+        cubeGroup.add(faceMesh);
+        cubeGroup.add(wireframeMesh);
+        cubeGroup.position.copy(offset);
+
+        // Store an update function in the group’s userData.
+        cubeGroup.userData.updateGeometry = () => {
+            updateCubeGeometry(faceMesh);
+            // Also update the wireframe.
+            const newWireframe = new THREE.WireframeGeometry(faceMesh.geometry);
+            wireframeMesh.geometry.dispose();
+            wireframeMesh.geometry = newWireframe;
+        };
+
+        return cubeGroup;
+    };
+
+    // ────────────────────────────────────────────────────────────────
+    // Set up scene, camera, renderer and add our editable cubes.
+    // ────────────────────────────────────────────────────────────────
     useEffect(() => {
         if (!mountRef.current) return;
 
-        // Use offset dimensions to include padding and borders
         const width = mountRef.current.offsetWidth;
         const height = mountRef.current.offsetHeight;
 
@@ -71,75 +228,15 @@ function Editable3DObject({
         camera.lookAt(0, 0, 0);
         cameraRef.current = camera;
 
-        // Create cube with more visible materials
-        // Helper function to add markers at the corners of a mesh.
-        const addCornerMarkers = (mesh: THREE.Mesh) => {
-            // Ensure the geometry's bounding box is computed.
-            mesh.geometry.computeBoundingBox();
-            const box = mesh.geometry.boundingBox;
-            if (!box) return;
-            const min = box.min;
-            const max = box.max;
-            // Define the 8 corners of the bounding box.
-            const corners = [
-                new THREE.Vector3(min.x, min.y, min.z),
-                new THREE.Vector3(min.x, min.y, max.z),
-                new THREE.Vector3(min.x, max.y, min.z),
-                new THREE.Vector3(min.x, max.y, max.z),
-                new THREE.Vector3(max.x, min.y, min.z),
-                new THREE.Vector3(max.x, min.y, max.z),
-                new THREE.Vector3(max.x, max.y, min.z),
-                new THREE.Vector3(max.x, max.y, max.z),
-            ];
-            // For each corner, create a small sphere marker with its own material.
-            corners.forEach((corner) => {
-                const markerMaterial = new THREE.MeshBasicMaterial({
-                    color: 0x0000ff,
-                });
-                const marker = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.05, 8, 8),
-                    markerMaterial
-                );
-                marker.position.copy(corner);
-                mesh.add(marker);
-                // Store the marker for later raycasting.
-                cornerMarkersRef.current.push(marker);
-            });
-        };
-        const geometry = new THREE.BoxGeometry();
-        const faceMaterial = new THREE.MeshBasicMaterial({
-            color: 0x00ff00,
-            opacity: 0.5, // Increased opacity for better visibility
-            transparent: true,
-        });
-        const wireframeMaterial = new THREE.MeshBasicMaterial({
-            color: 0x000000, // Changed wireframe color to black for contrast
-            wireframe: true,
-        });
-        const cube = new THREE.Mesh(geometry, [
-            faceMaterial,
-            wireframeMaterial,
-        ]);
-        addCornerMarkers(cube);
-
         const mainGroup = new THREE.Group();
-        mainGroup.add(new THREE.GridHelper(25, 25)); // Add grid helper
-        mainGroup.add(cube);
+        mainGroup.add(new THREE.GridHelper(25, 25));
 
-        // Add a second cube to the environment.
-        // Using the same geometry but a different material (red) for contrast.
-        const secondCube = new THREE.Mesh(
-            geometry,
-            new THREE.MeshBasicMaterial({
-                color: 0xff0000,
-                opacity: 0.5,
-                transparent: true,
-            })
-        );
-        // Position the second cube offset from the original cube.
-        secondCube.position.set(3, 0, 0);
-        addCornerMarkers(secondCube);
-        mainGroup.add(secondCube);
+        // Create two editable cubes.
+        const cube1 = createEditableCube(new THREE.Vector3(0, 0, 0), 0x00ff00);
+        mainGroup.add(cube1);
+
+        const cube2 = createEditableCube(new THREE.Vector3(3, 0, 0), 0xff0000);
+        mainGroup.add(cube2);
 
         mainGroupRef.current = mainGroup;
         scene.add(mainGroup);
@@ -147,7 +244,8 @@ function Editable3DObject({
         const raycaster = new THREE.Raycaster();
         const animate = () => {
             requestAnimationFrame(animate);
-            // Convert raw hand cursor coordinates (in pixels) to normalized device coordinates.
+
+            // Update hand cursors from pixel positions to normalized device coordinates.
             if (mountRef.current) {
                 const rect = mountRef.current.getBoundingClientRect();
                 if (leftHandCursor) {
@@ -168,7 +266,6 @@ function Editable3DObject({
             const pointers: THREE.Vector2[] = [];
             // Always include the mouse pointer.
             pointers.push(pointerRef.current);
-            // Include normalized hand cursor pointers if available.
             if (leftHandCursorRef.current)
                 pointers.push(leftHandCursorRef.current);
             if (rightHandCursorRef.current)
@@ -185,7 +282,7 @@ function Editable3DObject({
                 );
             });
 
-            // Highlight only the closest marker among all pointers if within tolerance.
+            // Highlight the closest marker if within tolerance.
             const TOLERANCE = 0.1 * (zoom || 1);
             let closestMarker: THREE.Mesh | null = null;
             let minDistance = Infinity;
@@ -205,15 +302,21 @@ function Editable3DObject({
                     }
                 });
             });
-
             cornerMarkersRef.current.forEach((marker) => {
                 const material = marker.material as THREE.MeshBasicMaterial;
                 if (marker === closestMarker && minDistance < TOLERANCE) {
-                    material.color.set(0xffff00); // Highlight closest marker.
+                    material.color.set(0xffff00);
                 } else {
-                    material.color.set(0x0000ff); // Default blue.
+                    material.color.set(0x0000ff);
                 }
             });
+
+            // Save the currently hovered marker (if within tolerance).
+            if (minDistance < TOLERANCE) {
+                hoveredMarkerRef.current = closestMarker;
+            } else {
+                hoveredMarkerRef.current = null;
+            }
 
             renderer.render(scene, camera);
         };
@@ -234,7 +337,7 @@ function Editable3DObject({
         };
     }, []);
 
-    // Update the main group's rotation and scale whenever the external props change.
+    // Update the main group’s rotation and scale (for zoom) when props change.
     useEffect(() => {
         if (mainGroupRef.current) {
             mainGroupRef.current.rotation.set(
@@ -248,42 +351,102 @@ function Editable3DObject({
         }
     }, [rotation, zoom]);
 
-    // Add mouse event listeners for interactive rotation.
+    // ────────────────────────────────────────────────────────────────
+    // Mouse event listeners:
+    // ────────────────────────────────────────────────────────────────
     useEffect(() => {
         const element = mountRef.current;
         if (!element) return;
 
-        // Use refs to track the drag state.
         const isDragging = { current: false };
         const lastMousePosition = { x: 0, y: 0 };
 
         const onMouseDown = (e: MouseEvent) => {
+            const rect = element.getBoundingClientRect();
+            // Use the saved hovered marker if available.
+            if (hoveredMarkerRef.current) {
+                activeMarkerRef.current = hoveredMarkerRef.current;
+                const markerWorldPos = new THREE.Vector3();
+                activeMarkerRef.current.getWorldPosition(markerWorldPos);
+                // Create a plane perpendicular to the camera direction that passes through the marker.
+                const plane = new THREE.Plane();
+                const camDir = new THREE.Vector3();
+                cameraRef.current!.getWorldDirection(camDir);
+                plane.setFromNormalAndCoplanarPoint(camDir, markerWorldPos);
+                dragPlaneRef.current = plane;
+                // Compute the drag offset.
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2(
+                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                    -((e.clientY - rect.top) / rect.height) * 2 + 1
+                );
+                raycaster.setFromCamera(mouse, cameraRef.current!);
+                const intersectionPoint = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
+                    dragOffsetRef.current
+                        .copy(markerWorldPos)
+                        .sub(intersectionPoint);
+                }
+                return; // Exit early since we have begun dragging a marker.
+            }
+            // Otherwise, begin rotating the scene.
             isDragging.current = true;
             lastMousePosition.x = e.clientX;
             lastMousePosition.y = e.clientY;
         };
 
         const onMouseMove = (e: MouseEvent) => {
-            // Update pointer for raycasting.
             const rect = element.getBoundingClientRect();
             pointerRef.current.x =
                 ((e.clientX - rect.left) / rect.width) * 2 - 1;
             pointerRef.current.y =
                 -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-            if (!isDragging.current) {
-                return;
+            // If a marker is active (being dragged), update its position.
+            if (activeMarkerRef.current && dragPlaneRef.current) {
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2(
+                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                    -((e.clientY - rect.top) / rect.height) * 2 + 1
+                );
+                raycaster.setFromCamera(mouse, cameraRef.current!);
+                const intersectionPoint = new THREE.Vector3();
+                if (
+                    raycaster.ray.intersectPlane(
+                        dragPlaneRef.current,
+                        intersectionPoint
+                    )
+                ) {
+                    intersectionPoint.add(dragOffsetRef.current);
+                    const parent = activeMarkerRef.current.parent; // should be the face mesh
+                    if (parent) {
+                        const localPos = parent.worldToLocal(
+                            intersectionPoint.clone()
+                        );
+                        activeMarkerRef.current.position.copy(localPos);
+                        // Now update the cube’s geometry (faces and edges) from its markers.
+                        const cubeGroup = parent.parent; // cubeGroup holds both meshes
+                        if (cubeGroup && cubeGroup.userData.updateGeometry) {
+                            cubeGroup.userData.updateGeometry();
+                        }
+                    } else {
+                        activeMarkerRef.current.position.copy(
+                            intersectionPoint
+                        );
+                    }
+                }
+                return; // when dragging a marker, do not rotate the scene.
             }
 
+            if (!isDragging.current) return;
+
+            // Rotate the main group.
             const dx = e.clientX - lastMousePosition.x;
             const dy = e.clientY - lastMousePosition.y;
-            const sensitivity = 0.005; // Adjust sensitivity as needed.
-
+            const sensitivity = 0.005;
             if (mainGroupRef.current) {
                 mainGroupRef.current.rotation.y += dx * sensitivity;
                 mainGroupRef.current.rotation.x += dy * sensitivity;
-
-                // Synchronize the rotation with parent's state.
                 if (onRotationChange) {
                     onRotationChange({
                         x: mainGroupRef.current.rotation.x,
@@ -292,13 +455,14 @@ function Editable3DObject({
                     });
                 }
             }
-
             lastMousePosition.x = e.clientX;
             lastMousePosition.y = e.clientY;
         };
 
         const onMouseUp = () => {
             isDragging.current = false;
+            activeMarkerRef.current = null;
+            dragPlaneRef.current = null;
         };
 
         element.addEventListener("mousedown", onMouseDown);
@@ -306,23 +470,17 @@ function Editable3DObject({
         element.addEventListener("mouseup", onMouseUp);
         element.addEventListener("mouseleave", onMouseUp);
 
-        // Add scroll-wheel event listener for zooming in/out.
+        // Add wheel event for zooming.
         const onWheel = (e: WheelEvent) => {
-            // Prevent page scroll
             e.preventDefault();
             if (mainGroupRef.current) {
-                const sensitivity = 0.002; // Adjust sensitivity as needed.
-                // Read the current uniform scale (assuming uniform scale is used)
+                const sensitivity = 0.002;
                 let currentZoom = mainGroupRef.current.scale.x;
-                // Scrolling up (deltaY negative) should zoom in, scrolling down zoom out.
                 let newZoom = currentZoom - e.deltaY * sensitivity;
-                // Clamp the zoom level between 0.5 and 5.
                 newZoom = Math.max(0.5, Math.min(5, newZoom));
-                // Propagate the new zoom to the parent.
                 if (onZoomChange) {
                     onZoomChange(newZoom);
                 }
-                // Optionally update the group's scale immediately.
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
             }
         };

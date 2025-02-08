@@ -1,19 +1,19 @@
 import { useEffect, useRef } from "react";
 import "./Cursor.css";
-
+import { Coords } from "../../objects/coords";
 interface CursorProps {
     name: string;
-    coords: React.MutableRefObject<{ x: number; y: number }>;
+    coords: Coords;
     overlayCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
 }
 
 function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
-    // Use a WeakMap to track hover state per button element without relying on button IDs.
-    const hoverState = useRef(new WeakMap<Element, boolean>());
+
     // Instead, we now track the hover start time and also store the timer IDs
     const hoverStartTimes = useRef(new WeakMap<Element, number>());
     const hoverTimers = useRef(new WeakMap<Element, number>());
+
     // Ref for the circular progress SVG circle.
     const progressRef = useRef<SVGCircleElement>(null);
 
@@ -31,8 +31,8 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
 
             const cursor = cursorRef.current;
             // Use the current coordinates from the ref.
-            const targetX = coords.current.x;
-            const targetY = coords.current.y;
+            const targetX = coords.x;
+            const targetY = coords.y;
 
             const { left: xOffset, top: yOffset } =
                 overlayCanvasRef.current?.getBoundingClientRect() || {
@@ -45,7 +45,7 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
             const previousY = parseFloat(cursor.style.top) || targetY;
 
             // Smoothly interpolate to the target position
-            const smoothingFactor = 0.9; // Adjusted for smoother response
+            const smoothingFactor = 0.3; // Adjusted for smoother response
             const newX = previousX + (targetX - previousX) * smoothingFactor;
             const newY = previousY + (targetY - previousY) * smoothingFactor;
 
@@ -66,7 +66,6 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                     absoluteCursorY >= rect.top - toleranceY &&
                     absoluteCursorY <= rect.bottom + toleranceY;
 
-                // const wasHovered = hoverState.current.get(button) || false;
                 if (isHovering) {
                     // If not already hovered, start hover detection.
                     if (!hoverStartTimes.current.has(button)) {

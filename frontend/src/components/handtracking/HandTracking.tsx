@@ -12,6 +12,11 @@ import { toast } from "react-toastify";
 import { Device } from "../../objects/device";
 import { useWebSocket } from "../../provider/WebSocketContext";
 import { useVideoStream } from "../../provider/VideoStreamContext";
+import {
+    InteractionState,
+    DEFAULT_INTERACTION_STATE,
+} from "../../objects/InteractionState";
+import { DEFAULT_COORDS } from "../../objects/coords";
 
 function HandTracking() {
     const [frame, setFrame] = useState<string | null>(null);
@@ -26,36 +31,12 @@ function HandTracking() {
     const debugContext = useDebug();
     const debug = debugContext?.debug;
 
-    const leftCursorCoords = useRef<{ x: number; y: number }>({
-        x: 0,
-        y: 0,
-    });
-    const rightCursorCoords = useRef<{ x: number; y: number }>({
-        x: 0,
-        y: 0,
-    });
+    const interactionStateRef = useRef<InteractionState>(
+        DEFAULT_INTERACTION_STATE
+    );
 
-    const cursorMap = useRef<{
-        [key: string]: React.MutableRefObject<{
-            x: number;
-            y: number;
-        }>;
-    }>({
-        leftCursor: leftCursorCoords,
-        rightCursor: rightCursorCoords,
-    });
-
-    const updateCursorPosition = (
-        elementId: string,
-        targetX: number,
-        targetY: number
-    ) => {
-        const cursor = cursorMap.current[elementId];
-        console.log("Cursor:", cursor);
-        if (cursor) {
-            cursor.current.x = targetX;
-            cursor.current.y = targetY;
-        }
+    const updateInteractionState = (interactionState: InteractionState) => {
+        interactionStateRef.current = interactionState;
     };
 
     // New state for 3D object rotation (angles in degrees)
@@ -99,9 +80,7 @@ function HandTracking() {
     const { drawHand, drawStrokes } = useSkeleton({
         overlayCanvasRef,
         debug,
-        updateCursorPosition,
-        onPinchMove: handlePinchMove,
-        onZoom: handleZoom,
+        updateInteractionState,
     });
 
     const previousDimensions = useRef<{ width: number; height: number }>({
@@ -131,8 +110,9 @@ function HandTracking() {
 
     // Function to calculate button column offset based on cursor positions
     const calculateButtonColumnOffset = () => {
-        const leftCursorX = leftCursorCoords.current.x;
-        const rightCursorX = rightCursorCoords.current.x;
+        const leftCursorX = interactionStateRef.current.Left?.cursor?.coords.x;
+        const rightCursorX =
+            interactionStateRef.current.Right?.cursor?.coords.x;
 
         // Check if cursors are within 250px of the left or right borders
         const canvasWidth = overlayCanvasRef.current?.offsetWidth;
@@ -140,7 +120,10 @@ function HandTracking() {
         let leftPeek = false;
         let rightPeek = false;
 
-        if (currentHandsData.some((hand) => hand.handedness === "Left")) {
+        if (
+            currentHandsData.some((hand) => hand.handedness === "Left") &&
+            leftCursorX
+        ) {
             if (leftCursorX <= 200) {
                 leftPeek = leftPeek || true;
             } else if (leftCursorX > 200) {
@@ -156,7 +139,10 @@ function HandTracking() {
             }
         }
 
-        if (currentHandsData.some((hand) => hand.handedness === "Right")) {
+        if (
+            currentHandsData.some((hand) => hand.handedness === "Right") &&
+            rightCursorX
+        ) {
             if (canvasWidth) {
                 if (rightCursorX >= canvasWidth - 200) {
                     rightPeek = rightPeek || true;
@@ -190,9 +176,9 @@ function HandTracking() {
     useEffect(() => {
         getAvailableCameras().then((cameras: MediaDeviceInfo[]) => {
             if (cameras.length > 0) {
-                console.log("Available cameras:");
+                // console.log("Available cameras:");
                 cameras.forEach((camera, index) => {
-                    console.log(`${index}: ${camera.label}`);
+                    // console.log(`${index}: ${camera.label}`);
                 });
                 setVideoDevices(cameras);
                 // Select a default camera (if 2nd available, otherwise first).
@@ -209,19 +195,19 @@ function HandTracking() {
     }, []);
 
     useEffect(() => {
-        console.log("Frame:", frame?.length);
+        // console.log("Frame:", frame?.length);
         if (frame && videoStreamStatus === "streaming") {
             if (websocket && websocket.readyState === WebSocket.OPEN) {
                 const payload = JSON.stringify({ image: frame });
                 websocket.send(payload);
-                console.log("Sent frame via websocket:", frame.length);
+                // console.log("Sent frame via websocket:", frame.length);
                 // Reset acknowledged until a response arrives.
                 setAcknowledged(false);
             } else {
-                console.log("WebSocket not open. Frame not sent.");
+                // console.log("WebSocket not open. Frame not sent.");
             }
         } else {
-            console.log("No frame to send.");
+            // console.log("No frame to send.");
         }
     }, [frame, videoStreamStatus, websocket]);
 
@@ -230,10 +216,10 @@ function HandTracking() {
         if (acknowledged && videoStreamStatus === "streaming") {
             const capturedFrame = captureFrame();
             if (capturedFrame?.length && capturedFrame.length > 100) {
-                console.log("Captured frame:", capturedFrame.length);
+                // console.log("Captured frame:", capturedFrame.length);
                 setFrame(capturedFrame);
             } else {
-                console.log("Failed to capture frame.");
+                // console.log("Failed to capture frame.");
                 setFrame(null);
             }
             // Prevent sending a new frame until the backend ack is received.
@@ -242,7 +228,7 @@ function HandTracking() {
         // Fallback: if no ack is received within 1 second, re-enable capture.
         const fallbackTimeout = setTimeout(() => {
             if (!acknowledged) {
-                console.log("Fallback: Triggering acknowledgment timeout.");
+                // console.log("Fallback: Triggering acknowledgment timeout.");
                 setAcknowledged(true);
             }
         }, 1000);
@@ -293,7 +279,7 @@ function HandTracking() {
             const handleMessage = (event: MessageEvent) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log("Received data from websocket:", data);
+                    // console.log("Received data from websocket:", data);
                     if (data.hands) {
                         setCurrentHandsData(data.hands);
                         setAcknowledged(true);
@@ -326,7 +312,9 @@ function HandTracking() {
             drawHand(hand, imageSize, ctx);
         });
         // Draw any strokes accumulated so far
-        drawStrokes(ctx);
+        if (debug) {
+            drawStrokes(ctx);
+        }
 
         calculateButtonColumnOffset();
     }, [currentHandsData, drawHand, drawStrokes]);
@@ -349,19 +337,29 @@ function HandTracking() {
             {debug && <div className="fps-display">{fps} FPS</div>}
             <Controls currentHandsData={currentHandsData} />
             <Editable3DObject
-                rotation={objectRotation}
-                zoom={objectZoom}
-                onRotationChange={setObjectRotation}
-                onZoomChange={setObjectZoom}
-                leftHandCursor={leftCursorCoords.current}
-                rightHandCursor={rightCursorCoords.current}
+                interactionState={interactionStateRef.current}
+                //rotation={objectRotation}
+                //zoom={objectZoom}
+                //onRotationChange={setObjectRotation}
+                //onZoomChange={setObjectZoom}
+                // leftHandCursor={
+                //     interactionStateRef.current.Left.cursor?.coords ||
+                //     DEFAULT_COORDS
+                // }
+                // rightHandCursor={
+                //     interactionStateRef.current.Right.cursor?.coords ||
+                //     DEFAULT_COORDS
+                // }
             />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             {/* Render left cursor if left hand is detected */}
             {currentHandsData.some((hand) => hand.handedness === "Left") && (
                 <Cursor
                     name="leftCursor"
-                    coords={cursorMap.current.leftCursor}
+                    coords={
+                        interactionStateRef.current.Left?.cursor?.coords ||
+                        DEFAULT_COORDS
+                    }
                     overlayCanvasRef={overlayCanvasRef}
                 />
             )}
@@ -369,7 +367,10 @@ function HandTracking() {
             {currentHandsData.some((hand) => hand.handedness === "Right") && (
                 <Cursor
                     name="rightCursor"
-                    coords={cursorMap.current.rightCursor}
+                    coords={
+                        interactionStateRef.current.Right?.cursor?.coords ||
+                        DEFAULT_COORDS
+                    }
                     overlayCanvasRef={overlayCanvasRef}
                 />
             )}

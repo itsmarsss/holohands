@@ -1,62 +1,62 @@
-import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { InteractionState } from "../../objects/InteractionState";
+import { useEffect, useRef } from "react";
+import { Coords, DEFAULT_COORDS } from "../../objects/coords";
 
 interface Editable3DObjectProps {
-    rotation: { x: number; y: number; z: number };
-    zoom?: number; // optional zoom prop
-    onRotationChange?: (rotation: { x: number; y: number; z: number }) => void;
-    onZoomChange?: (newZoom: number) => void;
-    leftHandCursor: { x: number; y: number };
-    rightHandCursor: { x: number; y: number };
+    interactionState: InteractionState;
 }
 
-function Editable3DObject({
-    rotation,
-    zoom,
-    onRotationChange,
-    onZoomChange,
-    leftHandCursor,
-    rightHandCursor,
-}: Editable3DObjectProps) {
+function Editable3DObject({ interactionState }: Editable3DObjectProps) {
     const mountRef = useRef<HTMLDivElement | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>();
     const cameraRef = useRef<THREE.PerspectiveCamera>();
     const sceneRef = useRef<THREE.Scene>();
     const mainGroupRef = useRef<THREE.Group>();
+    const zoomRef = useRef(1);
 
-    // Global refs for pointer and hand cursors.
+    const isDraggingRef = useRef(false);
+    const lastMousePosition = useRef<{
+        mouse: Coords;
+        leftHand: Coords;
+        rightHand: Coords;
+    }>({
+        mouse: DEFAULT_COORDS,
+        leftHand: DEFAULT_COORDS,
+        rightHand: DEFAULT_COORDS,
+    });
+
+    // Global refs for the mouse pointer and the cube's corner markers.
     const pointerRef = useRef(new THREE.Vector2(0, 0));
     const cornerMarkersRef = useRef<THREE.Mesh[]>([]);
-    // New ref to track the hovered marker.
+    // Track the currently hovered marker.
     const hoveredMarkerRef = useRef<THREE.Mesh | null>(null);
 
-    const leftHandCursorRef = useRef<THREE.Vector2>(
-        new THREE.Vector2(leftHandCursor.x, leftHandCursor.y)
-    );
-    const rightHandCursorRef = useRef<THREE.Vector2>(
-        new THREE.Vector2(rightHandCursor.x, rightHandCursor.y)
-    );
-    useEffect(() => {
-        leftHandCursorRef.current = new THREE.Vector2(
-            leftHandCursor.x,
-            leftHandCursor.y
-        );
-        rightHandCursorRef.current = new THREE.Vector2(
-            rightHandCursor.x,
-            rightHandCursor.y
-        );
-    }, [leftHandCursor, rightHandCursor]);
-
-    // Refs used for dragging a marker.
+    // Refs for dragging a marker.
     const activeMarkerRef = useRef<THREE.Mesh | null>(null);
     const dragOffsetRef = useRef(new THREE.Vector3());
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
+    // Keep an up-to-date copy of the interaction state for hand-based gestures.
+    const interactionStateRef = useRef(interactionState);
+    useEffect(() => {
+        interactionStateRef.current = interactionState;
+    }, [interactionState]);
+
+    // Refs for computing gesture deltas.
+    const pinchPrevPosRef = useRef<
+        Record<"Left" | "Right", { x: number; y: number } | null>
+    >({
+        Left: null,
+        Right: null,
+    });
+    const previousPinchDistanceRef = useRef<number | null>(null);
+
     // ────────────────────────────────────────────────────────────────
-    // Utility functions to create and update our editable cube:
+    // Utility functions for creating and updating our editable cube.
     // ────────────────────────────────────────────────────────────────
 
-    // Creates a BufferGeometry for a hexahedron given eight vertices.
+    // Given 8 vertices, create a BufferGeometry for a hexahedron.
     const createHexahedronGeometry = (
         vertices: THREE.Vector3[]
     ): THREE.BufferGeometry => {
@@ -91,19 +91,20 @@ function Editable3DObject({
             "position",
             new THREE.BufferAttribute(positions, 3)
         );
-        // Define faces (two triangles per face).
+
+        // Define the faces (two triangles per face).
         const indices = [
-            // Face 1: “min x” face: markers 0,1,3,2
+            // Face 1: "min x" face: markers 0,1,3,2
             0, 1, 3, 0, 3, 2,
-            // Face 2: “max x” face: markers 4,6,7,5
+            // Face 2: "max x" face: markers 4,6,7,5
             4, 6, 7, 4, 7, 5,
-            // Face 3: “min y” face: markers 0,4,5,1
+            // Face 3: "min y" face: markers 0,4,5,1
             0, 4, 5, 0, 5, 1,
-            // Face 4: “max y” face: markers 2,3,7,6
+            // Face 4: "max y" face: markers 2,3,7,6
             2, 3, 7, 2, 7, 6,
-            // Face 5: “min z” face: markers 0,2,6,4
+            // Face 5: "min z" face: markers 0,2,6,4
             0, 2, 6, 0, 6, 4,
-            // Face 6: “max z” face: markers 1,5,7,3
+            // Face 6: "max z" face: markers 1,5,7,3
             1, 5, 7, 1, 7, 3,
         ];
         geometry.setIndex(indices);
@@ -111,7 +112,7 @@ function Editable3DObject({
         return geometry;
     };
 
-    // Rebuild the face geometry of a cube from its corner markers.
+    // Update the cube geometry (both face and wireframe) from its corner markers.
     const updateCubeGeometry = (faceMesh: THREE.Mesh) => {
         const markers = faceMesh.children.filter(
             (child) => child.userData.isCornerMarker
@@ -125,12 +126,12 @@ function Editable3DObject({
         faceMesh.geometry = newGeometry;
     };
 
-    // Create an editable cube as a group.
+    // Create an editable cube from an offset and a face color.
     const createEditableCube = (offset: THREE.Vector3, faceColor: number) => {
-        // Define initial cube bounds.
+        // Define the initial cube bounds.
         const min = new THREE.Vector3(-0.5, -0.5, -0.5);
         const max = new THREE.Vector3(0.5, 0.5, 0.5);
-        // Create the eight corner vertices in a fixed order.
+        // Create the eight corner vertices.
         const v0 = new THREE.Vector3(min.x, min.y, min.z);
         const v1 = new THREE.Vector3(min.x, min.y, max.z);
         const v2 = new THREE.Vector3(min.x, max.y, min.z);
@@ -162,12 +163,11 @@ function Editable3DObject({
                 new THREE.SphereGeometry(0.05, 8, 8),
                 markerMaterial
             );
-            // Place the marker at the corresponding vertex.
             marker.position.copy(vertices[i]);
             marker.userData.isCornerMarker = true;
             marker.userData.cornerIndex = i;
             faceMesh.add(marker);
-            // Also add to our global marker list (for raycasting).
+            // Also add the marker to our global marker list.
             cornerMarkersRef.current.push(marker);
         }
 
@@ -188,10 +188,9 @@ function Editable3DObject({
         cubeGroup.add(wireframeMesh);
         cubeGroup.position.copy(offset);
 
-        // Store an update function in the group’s userData.
+        // Store an update function in the group's userData.
         cubeGroup.userData.updateGeometry = () => {
             updateCubeGeometry(faceMesh);
-            // Also update the wireframe.
             const newWireframe = new THREE.WireframeGeometry(faceMesh.geometry);
             wireframeMesh.geometry.dispose();
             wireframeMesh.geometry = newWireframe;
@@ -203,6 +202,110 @@ function Editable3DObject({
     // ────────────────────────────────────────────────────────────────
     // Set up scene, camera, renderer and add our editable cubes.
     // ────────────────────────────────────────────────────────────────
+
+    const cursorDown = (
+        x: number,
+        y: number,
+        source: "mouse" | "leftHand" | "rightHand"
+    ) => {
+        if (!mountRef.current) return;
+
+        const rect = mountRef.current.getBoundingClientRect();
+        // If a marker is hovered, begin dragging it.
+        if (hoveredMarkerRef.current) {
+            activeMarkerRef.current = hoveredMarkerRef.current;
+            const markerWorldPos = new THREE.Vector3();
+            activeMarkerRef.current.getWorldPosition(markerWorldPos);
+            // Create a plane perpendicular to the camera's direction through the marker.
+            const plane = new THREE.Plane();
+            const camDir = new THREE.Vector3();
+            cameraRef.current!.getWorldDirection(camDir);
+            plane.setFromNormalAndCoplanarPoint(camDir, markerWorldPos);
+            dragPlaneRef.current = plane;
+            // Compute the drag offset.
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2(
+                ((x - rect.left) / rect.width) * 2 - 1,
+                -((y - rect.top) / rect.height) * 2 + 1
+            );
+            raycaster.setFromCamera(mouse, cameraRef.current!);
+            const intersectionPoint = new THREE.Vector3();
+            if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
+                dragOffsetRef.current
+                    .copy(markerWorldPos)
+                    .sub(intersectionPoint);
+            }
+            return; // Exit early – we're now dragging a marker.
+        }
+        // Otherwise, start rotating the scene.
+        isDraggingRef.current = true;
+        lastMousePosition.current[source] = { x, y };
+    };
+
+    const cursorMove = (
+        x: number,
+        y: number,
+        source: "mouse" | "leftHand" | "rightHand"
+    ) => {
+        if (!mountRef.current) return;
+
+        const rect = mountRef.current.getBoundingClientRect();
+        pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
+        pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
+
+        // If dragging a marker, update its position.
+        if (activeMarkerRef.current && dragPlaneRef.current) {
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2(
+                ((x - rect.left) / rect.width) * 2 - 1,
+                -((y - rect.top) / rect.height) * 2 + 1
+            );
+            raycaster.setFromCamera(mouse, cameraRef.current!);
+            const intersectionPoint = new THREE.Vector3();
+            if (
+                raycaster.ray.intersectPlane(
+                    dragPlaneRef.current,
+                    intersectionPoint
+                )
+            ) {
+                intersectionPoint.add(dragOffsetRef.current);
+                const parent = activeMarkerRef.current.parent; // should be the face mesh
+                if (parent) {
+                    const localPos = parent.worldToLocal(
+                        intersectionPoint.clone()
+                    );
+                    activeMarkerRef.current.position.copy(localPos);
+                    // Update the cube's geometry.
+                    const cubeGroup = parent.parent;
+                    if (cubeGroup && cubeGroup.userData.updateGeometry) {
+                        cubeGroup.userData.updateGeometry();
+                    }
+                } else {
+                    activeMarkerRef.current.position.copy(intersectionPoint);
+                }
+            }
+            return;
+        }
+
+        if (!isDraggingRef.current) return;
+
+        // Rotate the main group (scene) with mouse movement.
+        const dx = x - lastMousePosition.current[source].x;
+        const dy = y - lastMousePosition.current[source].y;
+        const sensitivity = 0.005;
+        if (mainGroupRef.current) {
+            mainGroupRef.current.rotation.y += dx * sensitivity;
+            mainGroupRef.current.rotation.x += dy * sensitivity;
+        }
+        lastMousePosition.current[source] = { x, y };
+    };
+
+    const cursorUp = () => {
+        isDraggingRef.current = false;
+        activeMarkerRef.current = null;
+        dragPlaneRef.current = null;
+    };
+
     useEffect(() => {
         if (!mountRef.current) return;
 
@@ -242,34 +345,31 @@ function Editable3DObject({
         scene.add(mainGroup);
 
         const raycaster = new THREE.Raycaster();
+        let zoom = zoomRef.current;
+
         const animate = () => {
             requestAnimationFrame(animate);
 
-            // Update hand cursors from pixel positions to normalized device coordinates.
-            if (mountRef.current) {
+            // NEW: Update pointerRef based on hand tracking if available.
+            const leftHand = interactionStateRef.current.Left;
+            const rightHand = interactionStateRef.current.Right;
+            // Prefer Right hand cursor, fallback to Left hand.
+            const handCursor = rightHand?.cursor || leftHand?.cursor;
+            if (handCursor && mountRef.current) {
                 const rect = mountRef.current.getBoundingClientRect();
-                if (leftHandCursor) {
-                    leftHandCursorRef.current?.set(
-                        (leftHandCursor.x / rect.width) * 2 - 1,
-                        -((leftHandCursor.y - rect.top) / rect.height) * 2 + 1
-                    );
-                }
-                if (rightHandCursor) {
-                    rightHandCursorRef.current?.set(
-                        (rightHandCursor.x / rect.width) * 2 - 1,
-                        -((rightHandCursor.y - rect.top) / rect.height) * 2 + 1
-                    );
-                }
+                // Convert hand tracking coordinates to normalized device coordinates.
+                pointerRef.current.x =
+                    (handCursor.coords.x / rect.width) * 2 - 1;
+                pointerRef.current.y =
+                    -((handCursor.coords.y - rect.top) / rect.height) * 2 + 1;
             }
 
+            // ── Update marker highlighting via raycasting (mouse pointer) ──
             const hoveredMarkers = new Set<THREE.Object3D>();
             const pointers: THREE.Vector2[] = [];
-            // Always include the mouse pointer.
+            // Always include the pointerRef.
             pointers.push(pointerRef.current);
-            if (leftHandCursorRef.current)
-                pointers.push(leftHandCursorRef.current);
-            if (rightHandCursorRef.current)
-                pointers.push(rightHandCursorRef.current);
+            // (Optionally add additional pointer vectors if you want.)
 
             pointers.forEach((pointer) => {
                 raycaster.setFromCamera(pointer, camera);
@@ -282,8 +382,7 @@ function Editable3DObject({
                 );
             });
 
-            // Highlight the closest marker if within tolerance.
-            const TOLERANCE = 0.1 * (zoom || 1);
+            const TOLERANCE = 0.2 * (zoom || 1);
             let closestMarker: THREE.Mesh | null = null;
             let minDistance = Infinity;
             pointers.forEach((pointer) => {
@@ -310,13 +409,70 @@ function Editable3DObject({
                     material.color.set(0x0000ff);
                 }
             });
+            hoveredMarkerRef.current =
+                minDistance < TOLERANCE ? closestMarker : null;
 
-            // Save the currently hovered marker (if within tolerance).
-            if (minDistance < TOLERANCE) {
-                hoveredMarkerRef.current = closestMarker;
-            } else {
-                hoveredMarkerRef.current = null;
-            }
+            // ── Handle hand–gesture interactions ──
+            // Use dual–pinch for zoom and a single right–hand pinch for camera rotation.
+            // Dual pinch: both hands are pinching and have valid cursor coordinates.
+
+            // if (
+            //     leftHand.isPinching &&
+            //     rightHand.isPinching &&
+            //     leftHand.cursor &&
+            //     rightHand.cursor
+            // ) {
+            //     const dx = rightHand.cursor.coords.x - leftHand.cursor.coords.x;
+            //     const dy = rightHand.cursor.coords.y - leftHand.cursor.coords.y;
+
+            //     const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+            //     if (previousPinchDistanceRef.current === null) {
+            //         previousPinchDistanceRef.current = currentDistance;
+            //     } else {
+            //         const distanceDelta =
+            //             currentDistance - previousPinchDistanceRef.current;
+            //         const zoomSensitivity = 0.005;
+            //         if (mainGroupRef.current) {
+            //             let currentZoom = mainGroupRef.current.scale.x;
+            //             currentZoom += distanceDelta * zoomSensitivity;
+            //             currentZoom = Math.max(0.5, Math.min(5, currentZoom));
+            //             mainGroupRef.current.scale.set(
+            //                 currentZoom,
+            //                 currentZoom,
+            //                 currentZoom
+            //             );
+            //         }
+            //         previousPinchDistanceRef.current = currentDistance;
+            //     }
+            //     // When dual–pinching, clear any rotation tracking.
+            //     pinchPrevPosRef.current["Right"] = null;
+            // }
+            // // Single right–hand pinch: use its movement delta to rotate the camera.
+            // else if (rightHand.isPinching && rightHand.cursor) {
+            //     if (pinchPrevPosRef.current["Right"]) {
+            //         const prevPos = pinchPrevPosRef.current["Right"]!;
+            //         const deltaX = rightHand.cursor.coords.x - prevPos.x;
+            //         const deltaY = rightHand.cursor.coords.y - prevPos.y;
+            //         const rotationSensitivity = 0.005;
+            //         if (cameraRef.current) {
+            //             cameraRef.current.rotation.y +=
+            //                 deltaX * rotationSensitivity;
+            //             cameraRef.current.rotation.x +=
+            //                 deltaY * rotationSensitivity;
+            //         }
+            //     }
+            //     pinchPrevPosRef.current["Right"] = {
+            //         x: rightHand.cursor.coords.x,
+            //         y: rightHand.cursor.coords.y,
+            //     };
+            //     // Ensure dual–pinch zoom is reset.
+            //     previousPinchDistanceRef.current = null;
+            // } else {
+            //     // Reset when no pinch gesture is active.
+            //     pinchPrevPosRef.current["Right"] = null;
+            //     previousPinchDistanceRef.current = null;
+            // }
 
             renderer.render(scene, camera);
         };
@@ -333,142 +489,30 @@ function Editable3DObject({
         return () => {
             resizeObserver.disconnect();
             renderer.dispose();
-            mountRef.current?.removeChild(renderer.domElement);
+            if (mountRef.current) {
+                mountRef.current.removeChild(renderer.domElement);
+            }
         };
     }, []);
 
-    // Update the main group’s rotation and scale (for zoom) when props change.
-    useEffect(() => {
-        if (mainGroupRef.current) {
-            mainGroupRef.current.rotation.set(
-                rotation.x,
-                rotation.y,
-                rotation.z
-            );
-            if (typeof zoom === "number") {
-                mainGroupRef.current.scale.set(zoom, zoom, zoom);
-            }
-        }
-    }, [rotation, zoom]);
-
     // ────────────────────────────────────────────────────────────────
-    // Mouse event listeners:
+    // Mouse event listeners for marker dragging and scene rotation.
     // ────────────────────────────────────────────────────────────────
     useEffect(() => {
         const element = mountRef.current;
         if (!element) return;
 
-        const isDragging = { current: false };
-        const lastMousePosition = { x: 0, y: 0 };
-
         const onMouseDown = (e: MouseEvent) => {
-            const rect = element.getBoundingClientRect();
-            // Use the saved hovered marker if available.
-            if (hoveredMarkerRef.current) {
-                activeMarkerRef.current = hoveredMarkerRef.current;
-                const markerWorldPos = new THREE.Vector3();
-                activeMarkerRef.current.getWorldPosition(markerWorldPos);
-                // Create a plane perpendicular to the camera direction that passes through the marker.
-                const plane = new THREE.Plane();
-                const camDir = new THREE.Vector3();
-                cameraRef.current!.getWorldDirection(camDir);
-                plane.setFromNormalAndCoplanarPoint(camDir, markerWorldPos);
-                dragPlaneRef.current = plane;
-                // Compute the drag offset.
-                const raycaster = new THREE.Raycaster();
-                const mouse = new THREE.Vector2(
-                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-                    -((e.clientY - rect.top) / rect.height) * 2 + 1
-                );
-                raycaster.setFromCamera(mouse, cameraRef.current!);
-                const intersectionPoint = new THREE.Vector3();
-                if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
-                    dragOffsetRef.current
-                        .copy(markerWorldPos)
-                        .sub(intersectionPoint);
-                }
-                return; // Exit early since we have begun dragging a marker.
-            }
-            // Otherwise, begin rotating the scene.
-            isDragging.current = true;
-            lastMousePosition.x = e.clientX;
-            lastMousePosition.y = e.clientY;
+            cursorDown(e.clientX, e.clientY, "mouse");
         };
 
         const onMouseMove = (e: MouseEvent) => {
-            const rect = element.getBoundingClientRect();
-            pointerRef.current.x =
-                ((e.clientX - rect.left) / rect.width) * 2 - 1;
-            pointerRef.current.y =
-                -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-            // If a marker is active (being dragged), update its position.
-            if (activeMarkerRef.current && dragPlaneRef.current) {
-                const raycaster = new THREE.Raycaster();
-                const mouse = new THREE.Vector2(
-                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-                    -((e.clientY - rect.top) / rect.height) * 2 + 1
-                );
-                raycaster.setFromCamera(mouse, cameraRef.current!);
-                const intersectionPoint = new THREE.Vector3();
-                if (
-                    raycaster.ray.intersectPlane(
-                        dragPlaneRef.current,
-                        intersectionPoint
-                    )
-                ) {
-                    intersectionPoint.add(dragOffsetRef.current);
-                    const parent = activeMarkerRef.current.parent; // should be the face mesh
-                    if (parent) {
-                        const localPos = parent.worldToLocal(
-                            intersectionPoint.clone()
-                        );
-                        activeMarkerRef.current.position.copy(localPos);
-                        // Now update the cube’s geometry (faces and edges) from its markers.
-                        const cubeGroup = parent.parent; // cubeGroup holds both meshes
-                        if (cubeGroup && cubeGroup.userData.updateGeometry) {
-                            cubeGroup.userData.updateGeometry();
-                        }
-                    } else {
-                        activeMarkerRef.current.position.copy(
-                            intersectionPoint
-                        );
-                    }
-                }
-                return; // when dragging a marker, do not rotate the scene.
-            }
-
-            if (!isDragging.current) return;
-
-            // Rotate the main group.
-            const dx = e.clientX - lastMousePosition.x;
-            const dy = e.clientY - lastMousePosition.y;
-            const sensitivity = 0.005;
-            if (mainGroupRef.current) {
-                mainGroupRef.current.rotation.y += dx * sensitivity;
-                mainGroupRef.current.rotation.x += dy * sensitivity;
-                if (onRotationChange) {
-                    onRotationChange({
-                        x: mainGroupRef.current.rotation.x,
-                        y: mainGroupRef.current.rotation.y,
-                        z: mainGroupRef.current.rotation.z,
-                    });
-                }
-            }
-            lastMousePosition.x = e.clientX;
-            lastMousePosition.y = e.clientY;
+            cursorMove(e.clientX, e.clientY, "mouse");
         };
 
         const onMouseUp = () => {
-            isDragging.current = false;
-            activeMarkerRef.current = null;
-            dragPlaneRef.current = null;
+            cursorUp();
         };
-
-        element.addEventListener("mousedown", onMouseDown);
-        element.addEventListener("mousemove", onMouseMove);
-        element.addEventListener("mouseup", onMouseUp);
-        element.addEventListener("mouseleave", onMouseUp);
 
         // Add wheel event for zooming.
         const onWheel = (e: WheelEvent) => {
@@ -478,12 +522,14 @@ function Editable3DObject({
                 let currentZoom = mainGroupRef.current.scale.x;
                 let newZoom = currentZoom - e.deltaY * sensitivity;
                 newZoom = Math.max(0.5, Math.min(5, newZoom));
-                if (onZoomChange) {
-                    onZoomChange(newZoom);
-                }
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
             }
         };
+
+        element.addEventListener("mousedown", onMouseDown);
+        element.addEventListener("mousemove", onMouseMove);
+        element.addEventListener("mouseup", onMouseUp);
+        element.addEventListener("mouseleave", onMouseUp);
         element.addEventListener("wheel", onWheel, { passive: false });
 
         return () => {
@@ -493,7 +539,7 @@ function Editable3DObject({
             element.removeEventListener("mouseleave", onMouseUp);
             element.removeEventListener("wheel", onWheel);
         };
-    }, [onRotationChange, onZoomChange]);
+    }, []);
 
     return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
 }

@@ -26,7 +26,7 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         rightHand: DEFAULT_COORDS,
     });
 
-    // Global refs for the mouse pointer and the cube's corner markers.
+    // Global refs for the pointer and the cube's corner markers.
     const pointerRef = useRef(new THREE.Vector2(0, 0));
     const cornerMarkersRef = useRef<THREE.Mesh[]>([]);
     // Track the currently hovered marker.
@@ -37,7 +37,7 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
     const dragOffsetRef = useRef(new THREE.Vector3());
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
-    // Keep an up-to-date copy of the interaction state for hand-based gestures.
+    // Keep an up-to-date copy of the interaction state for hand–based gestures.
     const interactionStateRef = useRef(interactionState);
     useEffect(() => {
         interactionStateRef.current = interactionState;
@@ -51,6 +51,9 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         Right: null,
     });
     const previousPinchDistanceRef = useRef<number | null>(null);
+
+    // NEW: A ref to store the target rotation for smoothing.
+    const targetRotationRef = useRef({ x: 0, y: 0 });
 
     // ────────────────────────────────────────────────────────────────
     // Utility functions for creating and updating our editable cube.
@@ -200,7 +203,7 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
     };
 
     // ────────────────────────────────────────────────────────────────
-    // Set up scene, camera, renderer and add our editable cubes.
+    // Interaction handlers for pointer/hand events.
     // ────────────────────────────────────────────────────────────────
 
     const cursorDown = (
@@ -269,33 +272,38 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
                 )
             ) {
                 intersectionPoint.add(dragOffsetRef.current);
-                const parent = activeMarkerRef.current.parent; // should be the face mesh
+                const parent = activeMarkerRef.current.parent;
+                const dragSmoothing = 0.1; // Adjust for desired smoothness
                 if (parent) {
                     const localPos = parent.worldToLocal(
                         intersectionPoint.clone()
                     );
-                    activeMarkerRef.current.position.copy(localPos);
+                    activeMarkerRef.current.position.lerp(
+                        localPos,
+                        dragSmoothing
+                    );
                     // Update the cube's geometry.
                     const cubeGroup = parent.parent;
                     if (cubeGroup && cubeGroup.userData.updateGeometry) {
                         cubeGroup.userData.updateGeometry();
                     }
                 } else {
-                    activeMarkerRef.current.position.copy(intersectionPoint);
+                    activeMarkerRef.current.position.lerp(
+                        intersectionPoint,
+                        dragSmoothing
+                    );
                 }
             }
             return;
         }
 
-        if (!isDraggingRef.current) return;
-
-        // Rotate the main group (scene) with mouse movement.
-        const dx = x - lastMousePosition.current[source].x;
-        const dy = y - lastMousePosition.current[source].y;
-        const sensitivity = 0.005;
-        if (mainGroupRef.current) {
-            mainGroupRef.current.rotation.y += dx * sensitivity;
-            mainGroupRef.current.rotation.x += dy * sensitivity;
+        // When dragging the scene (i.e. no marker is active), update the target rotation.
+        if (isDraggingRef.current) {
+            const dx = x - lastMousePosition.current[source].x;
+            const dy = y - lastMousePosition.current[source].y;
+            const sensitivity = 0.01;
+            targetRotationRef.current.y += dx * sensitivity;
+            targetRotationRef.current.x += dy * sensitivity;
         }
         lastMousePosition.current[source] = { x, y };
     };
@@ -305,6 +313,10 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         activeMarkerRef.current = null;
         dragPlaneRef.current = null;
     };
+
+    // ────────────────────────────────────────────────────────────────
+    // Set up scene, camera, renderer and add our editable cubes.
+    // ────────────────────────────────────────────────────────────────
 
     useEffect(() => {
         if (!mountRef.current) return;
@@ -350,26 +362,38 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         const animate = () => {
             requestAnimationFrame(animate);
 
-            // NEW: Update pointerRef based on hand tracking if available.
+            // Smoothly interpolate the main group's rotation toward the target.
+            if (mainGroupRef.current) {
+                const smoothingFactor = 0.1; // Adjust for desired smoothness
+                mainGroupRef.current.rotation.x = THREE.MathUtils.lerp(
+                    mainGroupRef.current.rotation.x,
+                    targetRotationRef.current.x,
+                    smoothingFactor
+                );
+                mainGroupRef.current.rotation.y = THREE.MathUtils.lerp(
+                    mainGroupRef.current.rotation.y,
+                    targetRotationRef.current.y,
+                    smoothingFactor
+                );
+            }
+
+            // Update pointer from hand tracking if available.
             const leftHand = interactionStateRef.current.Left;
             const rightHand = interactionStateRef.current.Right;
             // Prefer Right hand cursor, fallback to Left hand.
             const handCursor = rightHand?.cursor || leftHand?.cursor;
             if (handCursor && mountRef.current) {
                 const rect = mountRef.current.getBoundingClientRect();
-                // Convert hand tracking coordinates to normalized device coordinates.
                 pointerRef.current.x =
                     (handCursor.coords.x / rect.width) * 2 - 1;
                 pointerRef.current.y =
                     -((handCursor.coords.y - rect.top) / rect.height) * 2 + 1;
             }
 
-            // ── Update marker highlighting via raycasting (mouse pointer) ──
+            // ── Update marker highlighting via raycasting ──
             const hoveredMarkers = new Set<THREE.Object3D>();
             const pointers: THREE.Vector2[] = [];
-            // Always include the pointerRef.
             pointers.push(pointerRef.current);
-            // (Optionally add additional pointer vectors if you want.)
 
             pointers.forEach((pointer) => {
                 raycaster.setFromCamera(pointer, camera);
@@ -412,67 +436,119 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
             hoveredMarkerRef.current =
                 minDistance < TOLERANCE ? closestMarker : null;
 
-            // ── Handle hand–gesture interactions ──
-            // Use dual–pinch for zoom and a single right–hand pinch for camera rotation.
-            // Dual pinch: both hands are pinching and have valid cursor coordinates.
+            // ── Handle hand–gesture interactions (dual–pinch, single–pinch) ──
+            // (These sections remain commented out for now.)
+            /*
+      if (
+        leftHand.isPinching &&
+        rightHand.isPinching &&
+        leftHand.cursor &&
+        rightHand.cursor
+      ) {
+        const dx = rightHand.cursor.coords.x - leftHand.cursor.coords.x;
+        const dy = rightHand.cursor.coords.y - leftHand.cursor.coords.y;
+        const currentDistance = Math.sqrt(dx * dx + dy * dy);
+        if (previousPinchDistanceRef.current === null) {
+          previousPinchDistanceRef.current = currentDistance;
+        } else {
+          const distanceDelta =
+            currentDistance - previousPinchDistanceRef.current;
+          const zoomSensitivity = 0.005;
+          if (mainGroupRef.current) {
+            let currentZoom = mainGroupRef.current.scale.x;
+            currentZoom += distanceDelta * zoomSensitivity;
+            currentZoom = Math.max(0.5, Math.min(5, currentZoom));
+            mainGroupRef.current.scale.set(
+              currentZoom,
+              currentZoom,
+              currentZoom
+            );
+          }
+          previousPinchDistanceRef.current = currentDistance;
+        }
+        pinchPrevPosRef.current["Right"] = null;
+      } else if (rightHand.isPinching && rightHand.cursor) {
+        if (pinchPrevPosRef.current["Right"]) {
+          const prevPos = pinchPrevPosRef.current["Right"]!;
+          const deltaX = rightHand.cursor.coords.x - prevPos.x;
+          const deltaY = rightHand.cursor.coords.y - prevPos.y;
+          const rotationSensitivity = 0.005;
+          if (cameraRef.current) {
+            cameraRef.current.rotation.y += deltaX * rotationSensitivity;
+            cameraRef.current.rotation.x += deltaY * rotationSensitivity;
+          }
+        }
+        pinchPrevPosRef.current["Right"] = {
+          x: rightHand.cursor.coords.x,
+          y: rightHand.cursor.coords.y,
+        };
+        previousPinchDistanceRef.current = null;
+      } else {
+        pinchPrevPosRef.current["Right"] = null;
+        previousPinchDistanceRef.current = null;
+      }
+      */
 
-            // if (
-            //     leftHand.isPinching &&
-            //     rightHand.isPinching &&
-            //     leftHand.cursor &&
-            //     rightHand.cursor
-            // ) {
-            //     const dx = rightHand.cursor.coords.x - leftHand.cursor.coords.x;
-            //     const dy = rightHand.cursor.coords.y - leftHand.cursor.coords.y;
+            // Handle right-hand interactions.
+            if (rightHand?.isHolding && rightHand.cursor) {
+                if (
+                    lastMousePosition.current["rightHand"].x ===
+                        DEFAULT_COORDS.x &&
+                    lastMousePosition.current["rightHand"].y ===
+                        DEFAULT_COORDS.y
+                ) {
+                    cursorDown(
+                        rightHand.cursor.coords.x,
+                        rightHand.cursor.coords.y,
+                        "rightHand"
+                    );
+                } else {
+                    cursorMove(
+                        rightHand.cursor.coords.x,
+                        rightHand.cursor.coords.y,
+                        "rightHand"
+                    );
+                }
+                lastMousePosition.current["rightHand"] = {
+                    ...rightHand.cursor.coords,
+                };
+            } else if (
+                lastMousePosition.current["rightHand"].x !== DEFAULT_COORDS.x ||
+                lastMousePosition.current["rightHand"].y !== DEFAULT_COORDS.y
+            ) {
+                cursorUp();
+                lastMousePosition.current["rightHand"] = DEFAULT_COORDS;
+            }
 
-            //     const currentDistance = Math.sqrt(dx * dx + dy * dy);
-
-            //     if (previousPinchDistanceRef.current === null) {
-            //         previousPinchDistanceRef.current = currentDistance;
-            //     } else {
-            //         const distanceDelta =
-            //             currentDistance - previousPinchDistanceRef.current;
-            //         const zoomSensitivity = 0.005;
-            //         if (mainGroupRef.current) {
-            //             let currentZoom = mainGroupRef.current.scale.x;
-            //             currentZoom += distanceDelta * zoomSensitivity;
-            //             currentZoom = Math.max(0.5, Math.min(5, currentZoom));
-            //             mainGroupRef.current.scale.set(
-            //                 currentZoom,
-            //                 currentZoom,
-            //                 currentZoom
-            //             );
-            //         }
-            //         previousPinchDistanceRef.current = currentDistance;
-            //     }
-            //     // When dual–pinching, clear any rotation tracking.
-            //     pinchPrevPosRef.current["Right"] = null;
-            // }
-            // // Single right–hand pinch: use its movement delta to rotate the camera.
-            // else if (rightHand.isPinching && rightHand.cursor) {
-            //     if (pinchPrevPosRef.current["Right"]) {
-            //         const prevPos = pinchPrevPosRef.current["Right"]!;
-            //         const deltaX = rightHand.cursor.coords.x - prevPos.x;
-            //         const deltaY = rightHand.cursor.coords.y - prevPos.y;
-            //         const rotationSensitivity = 0.005;
-            //         if (cameraRef.current) {
-            //             cameraRef.current.rotation.y +=
-            //                 deltaX * rotationSensitivity;
-            //             cameraRef.current.rotation.x +=
-            //                 deltaY * rotationSensitivity;
-            //         }
-            //     }
-            //     pinchPrevPosRef.current["Right"] = {
-            //         x: rightHand.cursor.coords.x,
-            //         y: rightHand.cursor.coords.y,
-            //     };
-            //     // Ensure dual–pinch zoom is reset.
-            //     previousPinchDistanceRef.current = null;
-            // } else {
-            //     // Reset when no pinch gesture is active.
-            //     pinchPrevPosRef.current["Right"] = null;
-            //     previousPinchDistanceRef.current = null;
-            // }
+            // Handle left-hand interactions.
+            if (leftHand?.isHolding && leftHand.cursor) {
+                if (
+                    lastMousePosition.current["leftHand"].x ===
+                        DEFAULT_COORDS.x &&
+                    lastMousePosition.current["leftHand"].y === DEFAULT_COORDS.y
+                ) {
+                    cursorDown(
+                        leftHand.cursor.coords.x,
+                        leftHand.cursor.coords.y,
+                        "leftHand"
+                    );
+                } else {
+                    cursorMove(
+                        leftHand.cursor.coords.x,
+                        leftHand.cursor.coords.y,
+                        "leftHand"
+                    );
+                }
+                lastMousePosition.current["leftHand"] = {
+                    ...leftHand.cursor.coords,
+                };
+            } else if (
+                lastMousePosition.current["leftHand"].x !== DEFAULT_COORDS.x ||
+                lastMousePosition.current["leftHand"].y !== DEFAULT_COORDS.y
+            ) {
+                cursorUp();
+                lastMousePosition.current["leftHand"] = DEFAULT_COORDS;
+            }
 
             renderer.render(scene, camera);
         };

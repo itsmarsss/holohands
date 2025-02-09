@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { Stroke } from "../objects/stroke";
 import { Hand, HAND_COLORS } from "../objects/hand";
 import {
@@ -444,21 +444,34 @@ function useSkeleton({
             // Ensure that the handedness is typed correctly
             const handedness: "Left" | "Right" = hand.handedness;
 
-            // Check if the hand is detected
-            if (hand) {
-                interactionStateRef.current = {
-                    ...interactionStateRef.current,
-                    [handedness]: newInteractionStateHand,
-                    angleBetween,
-                };
-            } else {
-                // If hand is not detected, set hand to null
-                interactionStateRef.current[handedness] = null;
-            }
-
-            updateInteractionState(interactionStateRef.current);
+            interactionStateRef.current = {
+                ...interactionStateRef.current,
+                [handedness]: newInteractionStateHand,
+                angleBetween,
+            };
 
             ctx.restore();
+        },
+        [debug, overlayCanvasRef, updateInteractionState]
+    );
+
+    const drawHands = useCallback(
+        (
+            hands: Hand[],
+            imageSize: ImageSize,
+            ctx: CanvasRenderingContext2D
+        ) => {
+            interactionStateRef.current = {
+                ...interactionStateRef.current,
+                Left: null,
+                Right: null,
+            };
+
+            hands.forEach((hand) => {
+                drawHand(hand, imageSize, ctx);
+            });
+
+            updateInteractionState(interactionStateRef.current);
         },
         [debug, overlayCanvasRef, updateInteractionState]
     );
@@ -491,7 +504,7 @@ function useSkeleton({
     }, []);
 
     // Return the necessary drawing functions
-    return { drawHand, drawStrokes };
+    return { drawHands, drawStrokes };
 }
 
 export default useSkeleton;

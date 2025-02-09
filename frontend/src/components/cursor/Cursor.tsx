@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
+import * as THREE from "three";
 import "./Cursor.css";
 import { Coords } from "../../objects/coords";
+
 interface CursorProps {
     name: string;
     coords: Coords;
@@ -10,7 +12,7 @@ interface CursorProps {
 function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
 
-    // Instead, we now track the hover start time and also store the timer IDs
+    // These refs track hover times and timers for simulated button hover.
     const hoverStartTimes = useRef(new WeakMap<Element, number>());
     const hoverTimers = useRef(new WeakMap<Element, number>());
 
@@ -18,7 +20,16 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const progressRef = useRef<SVGCircleElement>(null);
 
     // Increase the progress circle radius so that it goes around the cursor.
-    const progressRadius = 20; // Increased radius (you can adjust as needed)
+    const progressRadius = 20; // Adjust as needed
+
+    // NEW: A ref to store the target cursor position for smoothing.
+    const targetCursorRef = useRef({ x: coords.x, y: coords.y });
+
+    // Whenever the coords prop changes, update the target.
+    useEffect(() => {
+        targetCursorRef.current.x = coords.x;
+        targetCursorRef.current.y = coords.y;
+    }, [coords]);
 
     useEffect(() => {
         let animationFrameId: number;
@@ -30,24 +41,33 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
             }
 
             const cursor = cursorRef.current;
-            // Use the current coordinates from the ref.
-            const targetX = coords.x;
-            const targetY = coords.y;
+            // Use the target values from the ref.
+            const targetX = targetCursorRef.current.x;
+            const targetY = targetCursorRef.current.y;
 
+            // Get the overlay canvas offset.
             const { left: xOffset, top: yOffset } =
                 overlayCanvasRef.current?.getBoundingClientRect() || {
                     left: 0,
                     top: 0,
                 };
 
-            // Store previous cursor positions (or default to target if not set)
+            // Read the current cursor positions (if not set, default to target).
             const previousX = parseFloat(cursor.style.left) || targetX;
             const previousY = parseFloat(cursor.style.top) || targetY;
 
-            // Smoothly interpolate to the target position
-            const smoothingFactor = 0.3; // Adjusted for smoother response
-            const newX = previousX + (targetX - previousX) * smoothingFactor;
-            const newY = previousY + (targetY - previousY) * smoothingFactor;
+            // Smoothly interpolate toward the target using THREE.MathUtils.lerp.
+            const smoothingFactor = 0.3; // Adjust for the desired smoothness
+            const newX = THREE.MathUtils.lerp(
+                previousX,
+                targetX,
+                smoothingFactor
+            );
+            const newY = THREE.MathUtils.lerp(
+                previousY,
+                targetY,
+                smoothingFactor
+            );
 
             cursor.style.left = `${newX}px`;
             cursor.style.top = `${newY + yOffset}px`;
@@ -72,9 +92,8 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                         button.classList.add("simulated-hover");
                         const startTime = Date.now();
                         hoverStartTimes.current.set(button, startTime);
-                        // Start a timer that triggers a click after 500ms if still hovered.
+                        // Start a timer that triggers a click after 1000ms if still hovered.
                         const timerId = window.setTimeout(() => {
-                            // Only click if still hovered (i.e. if class still present)
                             if (button.classList.contains("simulated-hover")) {
                                 (button as HTMLButtonElement).click();
                             }
@@ -86,7 +105,6 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                 } else {
                     if (hoverStartTimes.current.has(button)) {
                         button.classList.remove("simulated-hover");
-                        // Cancel the timer if the cursor leaves the button area.
                         const timerId = hoverTimers.current.get(button);
                         if (timerId) {
                             clearTimeout(timerId);
@@ -97,7 +115,7 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                 }
             });
 
-            // Aggregate maximum progress from hovered buttons.
+            // Calculate the maximum progress value for the progress indicator.
             let maxProgress = 0;
             buttons.forEach((button) => {
                 const startTime = hoverStartTimes.current.get(button);
@@ -121,20 +139,18 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                 progressRef.current.style.opacity = maxProgress > 0 ? "1" : "0";
             }
 
-            // Schedule the next frame.
             animationFrameId = requestAnimationFrame(updateCursor);
         };
 
         updateCursor(); // Start the animation loop.
-
         return () => {
             cancelAnimationFrame(animationFrameId);
         };
-    }, [coords, overlayCanvasRef]);
+    }, [overlayCanvasRef]);
 
     return (
         <div className="cursor" id={name} ref={cursorRef}>
-            {/* Adjusted SVG: larger viewBox and repositioned center so the circle goes around the cursor */}
+            {/* SVG for the progress indicator (positioned around the cursor) */}
             <svg
                 className="cursor-progress"
                 viewBox="0 0 40 40"
@@ -142,8 +158,8 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                     width: "40px",
                     height: "40px",
                     position: "absolute",
-                    top: "-15px", // Offset so that the circle centers around the cursor element
-                    left: "-15px", // Adjust as necessary depending on your cursor dimensions
+                    top: "-15px", // Adjust so the circle centers around the cursor
+                    left: "-15px",
                 }}
             >
                 <circle

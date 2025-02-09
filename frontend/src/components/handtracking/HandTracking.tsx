@@ -37,6 +37,7 @@ function HandTracking() {
 
     const updateInteractionState = (interactionState: InteractionState) => {
         interactionStateRef.current = interactionState;
+        console.log(interactionStateRef.current);
     };
 
     // New state for 3D object rotation (angles in degrees)
@@ -77,7 +78,7 @@ function HandTracking() {
     }, []);
 
     // Pass the new onPinchMove callback into useSkeleton along with updateCursorPosition.
-    const { drawHand, drawStrokes } = useSkeleton({
+    const { drawHands, drawStrokes } = useSkeleton({
         overlayCanvasRef,
         debug,
         updateInteractionState,
@@ -308,16 +309,14 @@ function HandTracking() {
         const imageSize = { width: 640, height: 360 };
 
         // Draw each hand using useSkeleton's drawHand with the fixed reference dimensions.
-        currentHandsData.forEach((hand) => {
-            drawHand(hand, imageSize, ctx);
-        });
+        drawHands(currentHandsData, imageSize, ctx);
         // Draw any strokes accumulated so far
         if (debug) {
             drawStrokes(ctx);
         }
 
         calculateButtonColumnOffset();
-    }, [currentHandsData, drawHand, drawStrokes]);
+    }, [currentHandsData, drawHands, drawStrokes]);
 
     useEffect(() => {
         frameCount.current += 1;

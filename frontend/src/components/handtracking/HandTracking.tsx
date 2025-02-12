@@ -6,7 +6,6 @@ import { Hand } from "../../objects/hand";
 import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
 import ButtonColumn from "../buttoncolumn/ButtonColumn";
-import Cursor from "../cursor/Cursor";
 import { useDebug } from "../../provider/DebugContext";
 import { toast } from "react-toastify";
 import { Device } from "../../objects/device";
@@ -16,20 +15,19 @@ import {
     InteractionState,
     DEFAULT_INTERACTION_STATE,
 } from "../../objects/InteractionState";
-import { DEFAULT_COORDS } from "../../objects/coords";
+import Cursors from "../cursor/Cursors";
 
 function HandTracking() {
-    const [frame, setFrame] = useState<string | null>(null);
     const [fps, setFps] = useState<number>(0);
-    const frameCount = useRef<number>(0);
-    const lastTime = useRef<number>(Date.now());
+    const [frameCount, setFrameCount] = useState<number>(0);
+    const [lastTime, setLastTime] = useState<number>(Date.now());
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     // Add a debug toggle state.
     const debugContext = useDebug();
-    const debug = debugContext?.debug;
+    const debugRef = debugContext.getDebug();
 
     const interactionStateRef = useRef<InteractionState>(
         DEFAULT_INTERACTION_STATE
@@ -37,50 +35,13 @@ function HandTracking() {
 
     const updateInteractionState = (interactionState: InteractionState) => {
         interactionStateRef.current = interactionState;
-        console.log(interactionStateRef.current);
     };
-
-    // New state for 3D object rotation (angles in degrees)
-    const [objectRotation, setObjectRotation] = useState({ x: 0, y: 0, z: 0 });
-    // New state for 3D object zoom (scale factor)
-    const [objectZoom, setObjectZoom] = useState(1);
-
-    // Define onPinchMove callback to update 3D object rotation.
-    const handlePinchMove = useCallback(
-        (handedness: "Left" | "Right", deltaX: number, deltaY: number) => {
-            // For example, update rotation for the right hand when not in zoom mode.
-            if (handedness === "Right") {
-                const rotationFactor = 0.005; // adjust sensitivity as needed
-                setObjectRotation((prev) => ({
-                    x: prev.x + deltaY * rotationFactor,
-                    y: prev.y + deltaX * rotationFactor,
-                    z: prev.z,
-                }));
-            }
-        },
-        []
-    );
-
-    const handleZoom = useCallback((delta: number) => {
-        const zoomSensitivity = 0.005; // Base sensitivity
-        setObjectZoom((prev) => {
-            // Calculate the new zoom level
-            let newZoom = prev + delta * zoomSensitivity;
-
-            // Apply a diminishing return effect on zoom sensitivity
-            const zoomFactor = Math.log(newZoom + 1); // Logarithmic scaling
-            newZoom = prev + (delta * zoomSensitivity) / zoomFactor;
-
-            // Optionally clamp zoom between 0.05 and 5.
-            newZoom = Math.max(0.5, Math.min(5, newZoom));
-            return newZoom;
-        });
-    }, []);
 
     // Pass the new onPinchMove callback into useSkeleton along with updateCursorPosition.
     const { drawHands, drawStrokes } = useSkeleton({
         overlayCanvasRef,
-        debug,
+        debug: debugRef.current,
+        fps,
         updateInteractionState,
     });
 
@@ -89,22 +50,19 @@ function HandTracking() {
         height: 0,
     });
 
-    const [currentHandsData, setCurrentHandsData] = useState<Hand[]>([]);
-    const [acknowledged, setAcknowledged] = useState(false);
+    const currentHandsDataRef = useRef<Hand[]>([]);
+    // Replace high-frequency state with a ref so that HandTracking does not re-render every update.
 
     // State to keep track of available cameras and the selected camera
     const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
     const webSocketContext = useWebSocket();
-    const webSocketStatus = webSocketContext?.status;
-    const websocket = webSocketContext?.websocket;
 
     const videoStreamContext = useVideoStream();
-    const videoStreamStatus = videoStreamContext?.status;
-    const captureFrame = videoStreamContext?.captureFrame;
-    const getAvailableCameras = videoStreamContext?.getAvailableCameras;
-    const setActiveCamera = videoStreamContext?.setActiveCamera;
+    const captureFrame = videoStreamContext.captureFrame;
+    const getAvailableCameras = videoStreamContext.getAvailableCameras;
+    const setActiveCamera = videoStreamContext.setActiveCamera;
 
     const [leftButtonColumnPeek, setLeftButtonColumnPeek] = useState(false);
     const [rightButtonColumnPeek, setRightButtonColumnPeek] = useState(false);
@@ -122,7 +80,9 @@ function HandTracking() {
         let rightPeek = false;
 
         if (
-            currentHandsData.some((hand) => hand.handedness === "Left") &&
+            currentHandsDataRef.current.some(
+                (hand) => hand.handedness === "Left"
+            ) &&
             leftCursorX
         ) {
             if (leftCursorX <= 200) {
@@ -141,7 +101,9 @@ function HandTracking() {
         }
 
         if (
-            currentHandsData.some((hand) => hand.handedness === "Right") &&
+            currentHandsDataRef.current.some(
+                (hand) => hand.handedness === "Right"
+            ) &&
             rightCursorX
         ) {
             if (canvasWidth) {
@@ -173,68 +135,134 @@ function HandTracking() {
         }
     };
 
-    // --- Update available cameras and initial stream ---
-    useEffect(() => {
+    const setupVideoStreamTask = () => {
         getAvailableCameras().then((cameras: MediaDeviceInfo[]) => {
             if (cameras.length > 0) {
-                // console.log("Available cameras:");
+                console.log("Available cameras:");
                 cameras.forEach((camera, index) => {
-                    // console.log(`${index}: ${camera.label}`);
+                    console.log(`${index}: ${camera.label}`);
                 });
                 setVideoDevices(cameras);
                 // Select a default camera (if 2nd available, otherwise first).
+
                 const defaultDeviceId = cameras[0].deviceId;
                 setSelectedDevice({
                     deviceId: defaultDeviceId,
                     label: cameras[0].label,
                 });
-                setActiveCamera(defaultDeviceId);
             } else {
                 console.error("No cameras available");
             }
         });
+    };
+
+    const setupWebsocketTask = (websocket: WebSocket) => {
+        console.log("Setting up websocket task.");
+        const handleMessage = async (message: MessageEvent) => {
+            console.log("Received message from websocket");
+            let messageText = "";
+            if (typeof message.data === "string") {
+                messageText = message.data;
+            } else if (message.data instanceof Blob) {
+                messageText = await message.data.text();
+            }
+            try {
+                const data = JSON.parse(messageText);
+                // console.log("Received data from websocket:", data);
+                if (data.hands) {
+                    currentHandsDataRef.current = data.hands;
+                    acknowledgedRef.current = true;
+                    console.log("Acknowledged frame.");
+                }
+            } catch (error) {
+                console.error("Error parsing websocket message:", error);
+            }
+        };
+
+        websocket.addEventListener("message", handleMessage);
+    };
+
+    const videoStreamTask = (frame: string) => {
+        const websocket = webSocketContext.getWebSocket();
+        // console.log("Frame:", frame?.length);
+        if (frame && videoStreamContext.getStatus() === "streaming") {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const payload = JSON.stringify({ image: frame });
+                webSocketContext.sendFrame(payload);
+                console.log("Sent frame via websocket:", frame.length);
+            } else {
+                console.log("WebSocket not open. Frame not sent.");
+            }
+        } else {
+            console.log("No frame to send.");
+        }
+    };
+
+    const fallbackCounter = useRef<number>(0);
+
+    const acknowledgeFrameTask = (): string | null => {
+        fallbackCounter.current += 33;
+
+        // Use a mutable ref so that we do not trigger re-renders.
+        if (!acknowledgedRef.current && fallbackCounter.current > 5000) {
+            acknowledgedRef.current = true;
+            fallbackCounter.current = 0;
+        }
+
+        if (
+            acknowledgedRef.current &&
+            videoStreamContext.getStatus() === "streaming"
+        ) {
+            const capturedFrame = captureFrame();
+            if (capturedFrame?.length && capturedFrame.length > 100) {
+                console.log("Captured frame:", capturedFrame.length);
+
+                acknowledgedRef.current = false;
+                fallbackCounter.current = 0;
+                return capturedFrame;
+            } else {
+                console.log("Failed to capture frame.");
+            }
+        }
+
+        return null;
+    };
+
+    const websocketWatch = useRef<WebSocket | null>(null);
+
+    useEffect(() => {
+        if (
+            webSocketContext.getStatus() === "Connected" &&
+            websocketWatch.current
+        ) {
+            setupWebsocketTask(websocketWatch.current);
+        }
     }, []);
 
     useEffect(() => {
-        // console.log("Frame:", frame?.length);
-        if (frame && videoStreamStatus === "streaming") {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const payload = JSON.stringify({ image: frame });
-                websocket.send(payload);
-                // console.log("Sent frame via websocket:", frame.length);
-                // Reset acknowledged until a response arrives.
-                setAcknowledged(false);
-            } else {
-                // console.log("WebSocket not open. Frame not sent.");
-            }
-        } else {
-            // console.log("No frame to send.");
-        }
-    }, [frame, videoStreamStatus, websocket]);
+        setupVideoStreamTask();
 
-    // Updated effect: new frame is captured only when previous one is acknowledged.
-    useEffect(() => {
-        if (acknowledged && videoStreamStatus === "streaming") {
-            const capturedFrame = captureFrame();
-            if (capturedFrame?.length && capturedFrame.length > 100) {
-                // console.log("Captured frame:", capturedFrame.length);
-                setFrame(capturedFrame);
-            } else {
-                // console.log("Failed to capture frame.");
-                setFrame(null);
+        // Run the master loop once using a setInterval.
+        const masterLoop = setInterval(() => {
+            websocketWatch.current = webSocketContext.getWebSocket();
+
+            const capturedFrame = acknowledgeFrameTask();
+            if (capturedFrame) {
+                videoStreamTask(capturedFrame);
+
+                setFrameCount(frameCount + 1);
+                const now = Date.now();
+                const delta = now - lastTime;
+                if (delta >= 1000) {
+                    setFps(frameCount);
+                    setFrameCount(0);
+                    setLastTime(now);
+                }
             }
-            // Prevent sending a new frame until the backend ack is received.
-            setAcknowledged(false);
-        }
-        // Fallback: if no ack is received within 1 second, re-enable capture.
-        const fallbackTimeout = setTimeout(() => {
-            if (!acknowledged) {
-                // console.log("Fallback: Triggering acknowledgment timeout.");
-                setAcknowledged(true);
-            }
-        }, 1000);
-        return () => clearTimeout(fallbackTimeout);
-    }, [acknowledged, videoStreamStatus, captureFrame]);
+        }, 66);
+
+        return () => clearInterval(masterLoop);
+    }, []);
 
     const resizeCanvases = useCallback(() => {
         const overlayCanvas = overlayCanvasRef.current;
@@ -256,11 +284,7 @@ function HandTracking() {
         previousDimensions.current = { width, height };
     }, []);
 
-    // Replace the following lines (previously using setInterval):
-    // useEffect(() => {
-    //     const resizeInterval = setInterval(resizeCanvases, 1000);
-    //     return () => clearInterval(resizeInterval);
-    // }, [resizeCanvases]);
+    // Replace the following lines;
 
     // With this ResizeObserver-based effect:
     useEffect(() => {
@@ -276,103 +300,48 @@ function HandTracking() {
     }, [resizeCanvases]);
 
     useEffect(() => {
-        if (websocket) {
-            const handleMessage = (event: MessageEvent) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    // console.log("Received data from websocket:", data);
-                    if (data.hands) {
-                        setCurrentHandsData(data.hands);
-                        setAcknowledged(true);
-                    }
-                } catch (error) {
-                    console.error("Error parsing websocket message:", error);
-                }
-            };
-            websocket.addEventListener("message", handleMessage);
-            return () => {
-                websocket.removeEventListener("message", handleMessage);
-            };
-        }
-    }, [websocket]);
+        const draw = () => {
+            const canvas = overlayCanvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return;
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Use the fixed reference size.
+            const imageSize = { width: 640, height: 360 };
+            // Draw each hand
+            drawHands(currentHandsDataRef.current, imageSize, ctx);
+            // Draw any strokes accumulated (if in debug mode)
+            if (debugRef.current) {
+                drawStrokes(ctx);
+            }
+            calculateButtonColumnOffset();
+        };
+        const animationFrameId = requestAnimationFrame(draw);
 
-    useEffect(() => {
-        const canvas = overlayCanvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        // Clear the canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Instead of using the canvas dimensions, use the capture resolution (640 x 360)
-        // to compute proper scale factors.
-        const imageSize = { width: 640, height: 360 };
-
-        // Draw each hand using useSkeleton's drawHand with the fixed reference dimensions.
-        drawHands(currentHandsData, imageSize, ctx);
-        // Draw any strokes accumulated so far
-        if (debug) {
-            drawStrokes(ctx);
-        }
-
-        calculateButtonColumnOffset();
-    }, [currentHandsData, drawHands, drawStrokes]);
-
-    useEffect(() => {
-        frameCount.current += 1;
-        const now = Date.now();
-        const delta = now - lastTime.current;
-        if (delta >= 1000) {
-            setFps(frameCount.current);
-            frameCount.current = 0;
-            lastTime.current = now;
-        }
-    }, [frame]);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [currentHandsDataRef, drawHands, drawStrokes]);
 
     return (
         <div ref={containerRef} className="handtracking-container">
             {/* Display the WebSocket connection status */}
-            <div className="connection-status">{webSocketStatus}</div>
-            {debug && <div className="fps-display">{fps} FPS</div>}
-            <Controls currentHandsData={currentHandsData} />
+            <div className="connection-status">
+                {webSocketContext.getStatus()}
+            </div>
+            <Controls currentHandsDataRef={currentHandsDataRef} />
             <Editable3DObject
-                interactionState={interactionStateRef.current}
+                interactionStateRef={interactionStateRef}
                 //rotation={objectRotation}
                 //zoom={objectZoom}
                 //onRotationChange={setObjectRotation}
                 //onZoomChange={setObjectZoom}
-                // leftHandCursor={
-                //     interactionStateRef.current.Left.cursor?.coords ||
-                //     DEFAULT_COORDS
-                // }
-                // rightHandCursor={
-                //     interactionStateRef.current.Right.cursor?.coords ||
-                //     DEFAULT_COORDS
-                // }
             />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
-            {/* Render left cursor if left hand is detected */}
-            {currentHandsData.some((hand) => hand.handedness === "Left") && (
-                <Cursor
-                    name="leftCursor"
-                    coords={
-                        interactionStateRef.current.Left?.cursor?.coords ||
-                        DEFAULT_COORDS
-                    }
-                    overlayCanvasRef={overlayCanvasRef}
-                />
-            )}
-            {/* Render right cursor if right hand is detected */}
-            {currentHandsData.some((hand) => hand.handedness === "Right") && (
-                <Cursor
-                    name="rightCursor"
-                    coords={
-                        interactionStateRef.current.Right?.cursor?.coords ||
-                        DEFAULT_COORDS
-                    }
-                    overlayCanvasRef={overlayCanvasRef}
-                />
-            )}
+            <Cursors
+                currentHandsDataRef={currentHandsDataRef}
+                interactionStateRef={interactionStateRef}
+                overlayCanvasRef={overlayCanvasRef}
+            />
             <ButtonColumn side="left" count={5} peek={leftButtonColumnPeek} />
             <ButtonColumn side="right" count={5} peek={rightButtonColumnPeek} />
             <CameraSelect

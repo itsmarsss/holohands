@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef } from "react";
 import { Stroke } from "../objects/stroke";
 import { Hand, HAND_COLORS } from "../objects/hand";
 import {
@@ -49,12 +49,14 @@ const smoothValue = (
 interface UseSkeletonProps {
     overlayCanvasRef: React.RefObject<HTMLCanvasElement>;
     debug?: boolean;
+    fps: number;
     updateInteractionState: (interactionState: InteractionState) => void;
 }
 
 function useSkeleton({
     overlayCanvasRef,
     debug = false,
+    fps,
     updateInteractionState,
 }: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
@@ -67,11 +69,27 @@ function useSkeleton({
         Right: null,
     });
 
-    const distanceHistoryIndexThumb = useRef<number[]>([]);
-    const distanceHistoryMiddleThumb = useRef<number[]>([]);
+    const distanceHistoryIndexThumb = useRef<
+        Record<"Left" | "Right", number[]>
+    >({
+        Left: [],
+        Right: [],
+    });
+    const distanceHistoryMiddleThumb = useRef<
+        Record<"Left" | "Right", number[]>
+    >({
+        Left: [],
+        Right: [],
+    });
 
-    const historyTimeIndexThumb = useRef<number[]>([]);
-    const historyTimeMiddleThumb = useRef<number[]>([]);
+    const historyTimeIndexThumb = useRef<Record<"Left" | "Right", number[]>>({
+        Left: [],
+        Right: [],
+    });
+    const historyTimeMiddleThumb = useRef<Record<"Left" | "Right", number[]>>({
+        Left: [],
+        Right: [],
+    });
 
     // Add pinch start tracking for each hand for a new hold detection system.
     const pinchStartRef = useRef<Record<"Left" | "Right", number | null>>({
@@ -84,6 +102,19 @@ function useSkeleton({
     );
 
     const smoothingFactor = 0.5;
+
+    // ─── ADD NEW REFS FOR DEBOUNCING isHolding ────────────────────────────────
+    // This will hold the "committed" (debounced) holding state for each hand.
+    const committedHolding = useRef<Record<"Left" | "Right", boolean>>({
+        Left: false,
+        Right: false,
+    });
+    // This will hold a timer ID for each hand if the state is in transition.
+    const holdingTimer = useRef<Record<"Left" | "Right", number | null>>({
+        Left: null,
+        Right: null,
+    });
+    // ───────────────────────────────────────────────────────────────────────────
 
     const paintHands = useCallback(
         (
@@ -144,17 +175,17 @@ function useSkeleton({
     const calculateHolding = useCallback((hand: Hand) => {
         // Moving average of index-thumb distance
         const movingAverageIndexThumb =
-            distanceHistoryIndexThumb.current.reduce(
+            distanceHistoryIndexThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + val,
                 0
-            ) / distanceHistoryIndexThumb.current.length;
+            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
 
         // Variance of index-thumb distance
         const varianceIndexThumb =
-            distanceHistoryIndexThumb.current.reduce(
+            distanceHistoryIndexThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + Math.pow(val - movingAverageIndexThumb, 2),
                 0
-            ) / distanceHistoryIndexThumb.current.length;
+            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
 
         const stdDevIndexThumb = Math.sqrt(varianceIndexThumb);
 
@@ -184,33 +215,33 @@ function useSkeleton({
     const calculatePinching = useCallback((hand: Hand) => {
         // Moving average of index-thumb distance
         const movingAverageIndexThumb =
-            distanceHistoryIndexThumb.current.reduce(
+            distanceHistoryIndexThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + val,
                 0
-            ) / distanceHistoryIndexThumb.current.length;
+            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
 
         // Moving average of middle-thumb distance
         const movingAverageMiddleThumb =
-            distanceHistoryMiddleThumb.current.reduce(
+            distanceHistoryMiddleThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + val,
                 0
-            ) / distanceHistoryMiddleThumb.current.length;
+            ) / distanceHistoryMiddleThumb.current[hand.handedness].length;
 
         // Variance of index-thumb distance
         const varianceIndexThumb =
-            distanceHistoryIndexThumb.current.reduce(
+            distanceHistoryIndexThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + Math.pow(val - movingAverageIndexThumb, 2),
                 0
-            ) / distanceHistoryIndexThumb.current.length;
+            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
 
         const stdDevIndexThumb = Math.sqrt(varianceIndexThumb);
 
         // Variance of middle-thumb distance
         const varianceMiddleThumb =
-            distanceHistoryMiddleThumb.current.reduce(
+            distanceHistoryMiddleThumb.current[hand.handedness].reduce(
                 (sum, val) => sum + Math.pow(val - movingAverageMiddleThumb, 2),
                 0
-            ) / distanceHistoryMiddleThumb.current.length;
+            ) / distanceHistoryMiddleThumb.current[hand.handedness].length;
 
         const stdDevMiddleThumb = Math.sqrt(varianceMiddleThumb);
 
@@ -240,7 +271,7 @@ function useSkeleton({
                 pinchStartRef.current[hand.handedness] = currentTime;
             } else if (
                 currentTime - pinchStartRef.current[hand.handedness]! >
-                100
+                50
             ) {
                 isPinching = true;
             }
@@ -264,6 +295,14 @@ function useSkeleton({
             ctx.fillText(text, x, y);
         },
         [debug]
+    );
+    const drawText = useCallback(
+        (x: number, y: number, text: string, ctx: CanvasRenderingContext2D) => {
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "16px Arial";
+            ctx.fillText(text, x, y);
+        },
+        []
     );
 
     const drawHand = useCallback(
@@ -293,7 +332,9 @@ function useSkeleton({
             paintHands(hand, scaleX, scaleY, ctx);
 
             // Paint index-thumb connection
-            paintConnection(indexFinger, thumbFinger, scaleX, scaleY, ctx);
+            if (debug) {
+                paintConnection(indexFinger, thumbFinger, scaleX, scaleY, ctx);
+            }
 
             // Index-thumb distance
             const distanceIndexThumb = computeDistance(
@@ -312,32 +353,61 @@ function useSkeleton({
             );
 
             const currentTime = Date.now();
-            distanceHistoryIndexThumb.current.push(distanceIndexThumb);
-            historyTimeIndexThumb.current.push(currentTime);
+            distanceHistoryIndexThumb.current[hand.handedness].push(
+                distanceIndexThumb
+            );
+            historyTimeIndexThumb.current[hand.handedness].push(currentTime);
 
-            // Remove old index-thumb history entries (> 200ms)
+            // Remove old index-thumb history entries (> 50ms)
             while (
-                historyTimeIndexThumb.current.length > 0 &&
-                currentTime - historyTimeIndexThumb.current[0] > 100
+                historyTimeIndexThumb.current[hand.handedness].length > 0 &&
+                currentTime -
+                    historyTimeIndexThumb.current[hand.handedness][0] >
+                    50
             ) {
-                distanceHistoryIndexThumb.current.shift();
-                historyTimeIndexThumb.current.shift();
+                distanceHistoryIndexThumb.current[hand.handedness].shift();
+                historyTimeIndexThumb.current[hand.handedness].shift();
             }
 
-            distanceHistoryMiddleThumb.current.push(distanceMiddleThumb);
-            historyTimeMiddleThumb.current.push(currentTime);
+            distanceHistoryMiddleThumb.current[hand.handedness].push(
+                distanceMiddleThumb
+            );
+            historyTimeMiddleThumb.current[hand.handedness].push(currentTime);
 
-            // Remove old middle-thumb history entries (> 200ms)
+            // Remove old middle-thumb history entries (> 50ms)
             while (
-                historyTimeMiddleThumb.current.length > 0 &&
-                currentTime - historyTimeMiddleThumb.current[0] > 100
+                historyTimeMiddleThumb.current[hand.handedness].length > 0 &&
+                currentTime -
+                    historyTimeMiddleThumb.current[hand.handedness][0] >
+                    50
             ) {
-                distanceHistoryMiddleThumb.current.shift();
-                historyTimeMiddleThumb.current.shift();
+                distanceHistoryMiddleThumb.current[hand.handedness].shift();
+                historyTimeMiddleThumb.current[hand.handedness].shift();
             }
 
+            // Compute holding and pinching.
             const { isHolding, holdThreshold } = calculateHolding(hand);
             const { isPinching, pinchThreshold } = calculatePinching(hand);
+
+            // ─── DEBOUNCE THE isHolding STATE CHANGE ───────────────────────────
+            const handSide: "Left" | "Right" = hand.handedness;
+            if (isHolding !== committedHolding.current[handSide]) {
+                // If the new computed value differs from our committed value,
+                // start a timer (if one isn’t already running) to update after 50ms.
+                if (!holdingTimer.current[handSide]) {
+                    holdingTimer.current[handSide] = window.setTimeout(() => {
+                        committedHolding.current[handSide] = isHolding;
+                        holdingTimer.current[handSide] = null;
+                    }, 50);
+                }
+            } else {
+                // If the value is the same, clear any pending timer.
+                if (holdingTimer.current[handSide]) {
+                    clearTimeout(holdingTimer.current[handSide]!);
+                    holdingTimer.current[handSide] = null;
+                }
+            }
+            // ──────────────────────────────────────────────────────────────────────
 
             // Display mode information in debug text.
             debugText(
@@ -411,29 +481,12 @@ function useSkeleton({
                 });
             }
 
-            // Compute the angle between left and right cursors if available.
-            let angleBetween = 0;
-            if (
-                interactionStateRef.current.Left?.cursor &&
-                interactionStateRef.current.Right?.cursor
-            ) {
-                const leftCursor = interactionStateRef.current.Left.cursor;
-                const rightCursor = interactionStateRef.current.Right.cursor;
-                if (leftCursor && rightCursor) {
-                    angleBetween = computeAngle(
-                        leftCursor.coords.x,
-                        leftCursor.coords.y,
-                        rightCursor.coords.x,
-                        rightCursor.coords.y
-                    );
-                }
-            }
-
             // Update the interaction state for the current hand.
             const newCoords: Coords = { x: cursorX, y: cursorY };
 
+            // Note: Here we use the debounced (committed) holding value.
             const newInteractionStateHand: InteractionStateHand = {
-                isHolding,
+                isHolding: committedHolding.current[handSide],
                 isPinching,
                 cursor: {
                     coords: newCoords,
@@ -444,15 +497,20 @@ function useSkeleton({
             // Ensure that the handedness is typed correctly
             const handedness: "Left" | "Right" = hand.handedness;
 
-            interactionStateRef.current = {
-                ...interactionStateRef.current,
-                [handedness]: newInteractionStateHand,
-                angleBetween,
-            };
+            interactionStateRef.current[handedness] = newInteractionStateHand;
 
             ctx.restore();
         },
-        [debug, overlayCanvasRef, updateInteractionState]
+        [
+            debug,
+            overlayCanvasRef,
+            updateInteractionState,
+            calculateHolding,
+            calculatePinching,
+            paintHands,
+            paintConnection,
+            debugText,
+        ]
     );
 
     const drawHands = useCallback(
@@ -461,19 +519,41 @@ function useSkeleton({
             imageSize: ImageSize,
             ctx: CanvasRenderingContext2D
         ) => {
-            interactionStateRef.current = {
-                ...interactionStateRef.current,
-                Left: null,
-                Right: null,
-            };
+            interactionStateRef.current.Left = null;
+            interactionStateRef.current.Right = null;
 
             hands.forEach((hand) => {
                 drawHand(hand, imageSize, ctx);
             });
 
+            // Compute the angle between left and right cursors if available.
+            let angleBetween = 0;
+            if (
+                interactionStateRef.current.Left &&
+                interactionStateRef.current.Right
+            ) {
+                const leftCursor = (
+                    interactionStateRef.current.Left as InteractionStateHand
+                ).cursor;
+                const rightCursor = (
+                    interactionStateRef.current.Right as InteractionStateHand
+                ).cursor;
+                if (leftCursor && rightCursor) {
+                    angleBetween = computeAngle(
+                        leftCursor.coords.x,
+                        leftCursor.coords.y,
+                        rightCursor.coords.x,
+                        rightCursor.coords.y
+                    );
+                }
+            }
+            interactionStateRef.current.angleBetween = angleBetween;
+
             updateInteractionState(interactionStateRef.current);
+
+            debugText(10, 10, `FPS: ${fps}`, ctx);
         },
-        [debug, overlayCanvasRef, updateInteractionState]
+        [debug, overlayCanvasRef, updateInteractionState, drawHand, fps]
     );
 
     // Draw each stroke separately from the global strokes array.

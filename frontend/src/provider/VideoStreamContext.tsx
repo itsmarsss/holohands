@@ -1,23 +1,24 @@
 import React, {
     createContext,
     useContext,
-    useState,
     useEffect,
     useRef,
     useMemo,
+    useCallback,
 } from "react";
+import { StreamStatus } from "../objects/streamstatus";
 
 interface VideoStreamProps {
     children: React.ReactNode;
 }
 
 interface VideoStreamContextType {
-    status: string;
-    stream: MediaStream | null;
     videoRef: React.RefObject<HTMLVideoElement>;
     getAvailableCameras: () => Promise<MediaDeviceInfo[]>;
     captureFrame: () => string | null;
     setActiveCamera: (cameraId: string) => void;
+    getStatus: () => StreamStatus;
+    getStream: () => MediaStream | null;
 }
 
 // activeCamera: string | null;
@@ -31,75 +32,77 @@ interface VideoStreamContextType {
 const VideoStreamContext = createContext<VideoStreamContextType | null>(null);
 
 export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
-    const [activeCamera, setActiveCamera] = useState<string | null>(null);
-    const [streamStatus, setStreamStatus] = useState<
-        "idle" | "loading" | "error" | "streaming" | "stopped"
-    >("idle");
-    const [stream, setStream] = useState<MediaStream | null>(null);
+    const activeCameraRef = useRef<string | null>(null);
+    const streamStatusRef = useRef<StreamStatus>("idle");
+    const streamRef = useRef<MediaStream | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
 
     // Auto-select a camera on mount if none is selected.
     useEffect(() => {
         const initCamera = async () => {
             const cameras = await getAvailableCameras();
-            if (cameras.length > 0 && !activeCamera) {
+            if (cameras.length > 0 && !activeCameraRef.current) {
                 console.log(
                     "Auto-selecting first camera:",
                     cameras[0].deviceId
                 );
-                setActiveCamera(cameras[0].deviceId);
+                activeCameraRef.current = cameras[0].deviceId;
+                // Start the stream immediately if a camera is available.
+                startStream(cameras[0].deviceId);
             }
         };
         initCamera();
-    }, []); // empty dependency: run once on mount
+    }, []);
 
     useEffect(() => {
-        if (activeCamera) {
-            startStream(activeCamera);
+        console.log("Stream status:", streamStatusRef.current);
+    }, [streamStatusRef.current]);
+
+    const getAvailableCameras = useCallback(async (): Promise<
+        MediaDeviceInfo[]
+    > => {
+        try {
+            // Request camera access so that device labels become available.
+            await navigator.mediaDevices.getUserMedia({ video: true });
+        } catch (error) {
+            console.error("Camera permission error:", error);
         }
-    }, [activeCamera]);
-
-    useEffect(() => {
-        console.log("Stream status:", streamStatus);
-    }, [streamStatus]);
-
-    const getAvailableCameras = async (): Promise<MediaDeviceInfo[]> => {
         const devices = await navigator.mediaDevices.enumerateDevices();
         return devices.filter((device) => device.kind === "videoinput");
-    };
+    }, []);
 
     const startStream = async (deviceId: string) => {
         console.log("Starting stream");
 
         stopStream(); // Stop any existing stream before starting a new one
 
-        setStreamStatus("loading");
+        streamStatusRef.current = "loading";
 
         try {
             const newStream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     deviceId,
-                    width: { ideal: 640 }, // Set ideal width
-                    height: { ideal: 360 }, // Set ideal height
+                    width: { ideal: 640 },
+                    height: { ideal: 360 },
                 },
             });
-            setStream(newStream);
-            setActiveCamera(deviceId);
+            streamRef.current = newStream;
+            activeCameraRef.current = deviceId;
             if (videoRef.current) {
                 videoRef.current.srcObject = newStream;
             }
-            setStreamStatus("streaming");
+            streamStatusRef.current = "streaming";
         } catch (error) {
             console.error("Error accessing camera:", error);
-            setStreamStatus("error");
+            streamStatusRef.current = "error";
         }
     };
 
     const stopStream = () => {
-        if (stream) {
-            stream.getTracks().forEach((track) => track.stop());
-            setStream(null);
-            setStreamStatus("stopped");
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+            streamStatusRef.current = "stopped";
         }
     };
 
@@ -130,21 +133,18 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
 
     const videoStreamContextValue = useMemo(
         () => ({
-            status: streamStatus,
-            stream,
-            setActiveCamera,
+            // Accessor functions to read the mutable refs.
+            getStatus: () => streamStatusRef.current,
+            getStream: () => streamRef.current,
             videoRef,
             getAvailableCameras,
             captureFrame,
+            setActiveCamera: (cameraId: string) => {
+                activeCameraRef.current = cameraId;
+                startStream(cameraId);
+            },
         }),
-        [
-            streamStatus,
-            stream,
-            setActiveCamera,
-            videoRef,
-            getAvailableCameras,
-            captureFrame,
-        ]
+        []
     );
     return (
         <VideoStreamContext.Provider value={videoStreamContextValue}>

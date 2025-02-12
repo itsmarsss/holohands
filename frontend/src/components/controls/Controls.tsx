@@ -10,10 +10,10 @@ interface Hand {
 }
 
 interface ControlsProps {
-    currentHandsData: Hand[];
+    currentHandsDataRef: React.MutableRefObject<Hand[]>;
 }
 
-const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
+const Controls: React.FC<ControlsProps> = ({ currentHandsDataRef }) => {
     const saveHandSymbol = async (handedness: string) => {
         const name = (
             document.getElementById(
@@ -26,7 +26,7 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
             return;
         }
 
-        const handData = currentHandsData.find(
+        const handData = currentHandsDataRef.current.find(
             (hand) => hand.handedness === handedness
         );
 
@@ -37,7 +37,7 @@ const Controls: React.FC<ControlsProps> = ({ currentHandsData }) => {
 
         try {
             const response = await fetch(
-                "http://localhost:6969/save_handsymbol",
+                `http://${import.meta.env.VITE_BASE_URL}/save_handsymbol`,
                 {
                     method: "POST",
                     headers: {

@@ -1,5 +1,6 @@
 import "./ButtonColumn.css";
 import { toast } from "react-toastify";
+import { memo } from "react";
 
 interface ButtonColumnProps {
     side: "left" | "right";
@@ -7,7 +8,7 @@ interface ButtonColumnProps {
     peek: boolean;
 }
 
-function ButtonColumn({ side, count, peek }: ButtonColumnProps) {
+const ButtonColumn = memo(({ side, count, peek }: ButtonColumnProps) => {
     const handleClick = (index: number) => {
         toast.info(`Button ${index + 1} clicked!`);
     };
@@ -25,6 +26,6 @@ function ButtonColumn({ side, count, peek }: ButtonColumnProps) {
             ))}
         </div>
     );
-}
+});
 
 export default ButtonColumn;

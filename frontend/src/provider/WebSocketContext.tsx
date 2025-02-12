@@ -2,11 +2,11 @@ import {
     createContext,
     useContext,
     useRef,
-    useEffect,
     ReactNode,
-    useState,
     useMemo,
+    useEffect,
 } from "react";
+import { SocketStatus } from "../objects/socketstatus";
 
 interface WebSocketProps {
     url: string;
@@ -14,24 +14,24 @@ interface WebSocketProps {
 }
 
 interface WebSocketContextType {
-    status: string;
-    websocket: WebSocket | null;
+    getWebSocket: () => WebSocket | null;
+    getStatus: () => SocketStatus;
+    sendFrame: (frame: string) => void;
+    getAcknowledged: () => boolean;
+    getData: () => JSON | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     const wsRef = useRef<WebSocket | null>(null);
-    const [connectionStatus, setConnectionStatus] =
-        useState<string>("Connecting...");
-    const [retryTimeout, setRetryTimeout] = useState<number | null>(null);
+    const connectionStatusRef = useRef<SocketStatus>("Connecting...");
+    const retryTimeoutRef = useRef<number | null>(null);
+    const acknowledgedRef = useRef<boolean>(false);
+    const dataRef = useRef<JSON | null>(null);
 
     const connect = () => {
-        if (wsRef.current) {
-            console.warn("WebSocket already exists, skipping new connection.");
-            return;
-        }
-        setConnectionStatus((_prev) => "Connecting...");
+        connectionStatusRef.current = "Connecting...";
         const ws = new WebSocket(url);
         wsRef.current = ws;
 
@@ -39,36 +39,37 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     };
 
     const initWebSocket = (ws: WebSocket) => {
+        console.log("Initializing WebSocket");
         ws.onopen = () => {
-            console.log("WebSocket connection established.");
-            setConnectionStatus((_prev) => "Connected");
-            if (retryTimeout) {
-                clearTimeout(retryTimeout);
-                setRetryTimeout(null);
+            connectionStatusRef.current = "Connected";
+
+            if (retryTimeoutRef.current) {
+                clearTimeout(retryTimeoutRef.current);
+                retryTimeoutRef.current = null;
             }
         };
 
         ws.onclose = () => {
             console.warn("WebSocket connection closed.");
-            setConnectionStatus((_prev) => "Disconnected");
+            connectionStatusRef.current = "Disconnected";
             wsRef.current = null;
             retryConnection();
         };
 
         ws.onerror = (error) => {
             console.error("WebSocket error:", error);
-            setConnectionStatus((_prev) => "Error");
+            connectionStatusRef.current = "Error";
             ws.close();
         };
     };
 
     const retryConnection = () => {
-        if (retryTimeout) return; // Prevent multiple timeouts
+        if (retryTimeoutRef.current) return; // Prevent multiple timeouts
         const timeout = setTimeout(() => {
             console.log("Retrying WebSocket connection...");
             connect();
         }, 1000); // Adjust the timeout as needed
-        setRetryTimeout(timeout);
+        retryTimeoutRef.current = timeout;
     };
 
     useEffect(() => {
@@ -83,12 +84,22 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         };
     }, []);
 
+    const sendFrame = (frame: string) => {
+        if (wsRef.current) {
+            wsRef.current.send(frame);
+            acknowledgedRef.current = false;
+        }
+    };
+
     const websocketContextValue = useMemo(
         () => ({
-            status: connectionStatus,
-            websocket: wsRef.current,
+            getWebSocket: () => wsRef.current,
+            getStatus: () => connectionStatusRef.current,
+            sendFrame,
+            getAcknowledged: () => acknowledgedRef.current,
+            getData: () => dataRef.current,
         }),
-        [connectionStatus]
+        []
     );
 
     return (

@@ -10,8 +10,7 @@ const SideBar: React.FC = () => {
     };
 
     const debugContext = useDebug();
-    const debug = debugContext?.debug;
-    const setDebug = debugContext?.setDebug;
+    const debug = debugContext.getDebug();
 
     return (
         <>
@@ -35,8 +34,10 @@ const SideBar: React.FC = () => {
                         <label>
                             <input
                                 type="checkbox"
-                                checked={debug}
-                                onChange={(e) => setDebug?.(e.target.checked)}
+                                checked={debug.current}
+                                onChange={(e) =>
+                                    (debug.current = e.target.checked)
+                                }
                             />
                             Debug
                         </label>

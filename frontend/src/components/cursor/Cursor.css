@@ -8,3 +8,19 @@
     z-index: 100;
     transform: translate(-50%, -50%); /* Center the cursor on the point */
 }
+
+.cursor-progress {
+    width: 40px;
+    height: 40px;
+    position: absolute;
+    top: -15px;
+    left: -15px;
+}
+
+.cursor-status {
+    width: fit-content;
+    position: absolute;
+    transform: translate(-50%, 5px);
+    text-align: center;
+    left: 50%;
+}

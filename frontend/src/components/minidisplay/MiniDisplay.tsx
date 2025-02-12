@@ -5,7 +5,7 @@ import { useVideoStream } from "../../provider/VideoStreamContext";
 function MiniDisplay() {
     const videoStreamContext = useVideoStream();
     const videoRef = videoStreamContext?.videoRef;
-    const stream = videoStreamContext?.stream;
+    const stream = videoStreamContext?.getStream();
 
     useEffect(() => {
         if (videoRef?.current && stream) {

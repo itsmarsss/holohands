@@ -9,7 +9,9 @@ function App() {
     return (
         <div className="app-container">
             <DebugContextProvider defaultDebug={false}>
-                <WebSocketProvider url={"ws://localhost:6969/ws"}>
+                <WebSocketProvider
+                    url={`ws://${import.meta.env.VITE_BASE_URL}/ws`}
+                >
                     <VideoStreamProvider>
                         {/* Left side: SideBar */}
                         <SideBar />

@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import { InteractionState } from "../../objects/InteractionState";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { Coords, DEFAULT_COORDS } from "../../objects/coords";
 
 interface Editable3DObjectProps {
-    interactionState: InteractionState;
+    interactionStateRef: React.MutableRefObject<InteractionState>;
 }
 
-function Editable3DObject({ interactionState }: Editable3DObjectProps) {
+function Editable3DObject({
+    interactionStateRef: interactionState,
+}: Editable3DObjectProps) {
     const mountRef = useRef<HTMLDivElement | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer>();
     const cameraRef = useRef<THREE.PerspectiveCamera>();
@@ -38,10 +40,16 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
     // Keep an up-to-date copy of the interaction state for hand–based gestures.
-    const interactionStateRef = useRef(interactionState);
+    const interactionStateRef = useRef<InteractionState | null>(
+        interactionState.current
+    );
+
     useEffect(() => {
-        interactionStateRef.current = interactionState;
-    }, [interactionState]);
+        setInterval(() => {
+            interactionStateRef.current = interactionState.current;
+            // console.log("Interaction state:", interactionStateRef.current);
+        }, 33);
+    }, []);
 
     // Refs for computing gesture deltas.
     const pinchPrevPosRef = useRef<
@@ -50,10 +58,14 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         Left: null,
         Right: null,
     });
+    // This ref holds the previous distance between the two hand cursors.
     const previousPinchDistanceRef = useRef<number | null>(null);
 
     // NEW: A ref to store the target rotation for smoothing.
     const targetRotationRef = useRef({ x: 0, y: 0 });
+
+    // NEW: A ref to store the target zoom (scale) for smoothing.
+    const targetZoomRef = useRef(1);
 
     // ────────────────────────────────────────────────────────────────
     // Utility functions for creating and updating our editable cube.
@@ -202,6 +214,13 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         return cubeGroup;
     };
 
+    // Memoize the creation of the editable cube.
+    // Adjust the offset and faceColor as needed.
+    const memoizedCubeGroup = useMemo(
+        () => createEditableCube(new THREE.Vector3(0, 0, 0), 0xff0000),
+        [] // empty dep array so that it is created only once
+    );
+
     // ────────────────────────────────────────────────────────────────
     // Interaction handlers for pointer/hand events.
     // ────────────────────────────────────────────────────────────────
@@ -212,7 +231,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         source: "mouse" | "leftHand" | "rightHand"
     ) => {
         if (!mountRef.current) return;
-
         const rect = mountRef.current.getBoundingClientRect();
         // If a marker is hovered, begin dragging it.
         if (hoveredMarkerRef.current) {
@@ -251,7 +269,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         source: "mouse" | "leftHand" | "rightHand"
     ) => {
         if (!mountRef.current) return;
-
         const rect = mountRef.current.getBoundingClientRect();
         pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
         pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
@@ -320,7 +337,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
 
     useEffect(() => {
         if (!mountRef.current) return;
-
         const width = mountRef.current.offsetWidth;
         const height = mountRef.current.offsetHeight;
 
@@ -349,7 +365,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
         // Create two editable cubes.
         const cube1 = createEditableCube(new THREE.Vector3(0, 0, 0), 0x00ff00);
         mainGroup.add(cube1);
-
         const cube2 = createEditableCube(new THREE.Vector3(3, 0, 0), 0xff0000);
         mainGroup.add(cube2);
 
@@ -377,10 +392,49 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
                 );
             }
 
+            // ── Handle dual–pinch zoom: Only when both hands are holding (pinching) ──
+            const leftHand = interactionStateRef.current?.Left;
+            const rightHand = interactionStateRef.current?.Right;
+            if (
+                leftHand?.isHolding &&
+                rightHand?.isHolding &&
+                leftHand.cursor &&
+                rightHand.cursor
+            ) {
+                const dx = rightHand.cursor.coords.x - leftHand.cursor.coords.x;
+                const dy = rightHand.cursor.coords.y - leftHand.cursor.coords.y;
+                const currentDistance = Math.sqrt(dx * dx + dy * dy);
+                if (previousPinchDistanceRef.current === null) {
+                    previousPinchDistanceRef.current = currentDistance;
+                } else {
+                    const distanceDelta =
+                        currentDistance - previousPinchDistanceRef.current;
+                    const zoomSensitivity = 0.005;
+                    // Update the target zoom instead of directly setting scale.
+                    let newTargetZoom =
+                        targetZoomRef.current + distanceDelta * zoomSensitivity;
+                    newTargetZoom = Math.max(0.5, Math.min(5, newTargetZoom));
+                    targetZoomRef.current = newTargetZoom;
+                    previousPinchDistanceRef.current = currentDistance;
+                }
+            } else {
+                // Reset previous pinch distance when both hands are not holding.
+                previousPinchDistanceRef.current = null;
+            }
+
+            // Smoothly interpolate the main group's zoom (scale) toward targetZoomRef.
+            if (mainGroupRef.current) {
+                const smoothingFactorZoom = 0.05; // Adjust for desired zoom smoothness
+                const currentZoom = mainGroupRef.current.scale.x;
+                const newZoom = THREE.MathUtils.lerp(
+                    currentZoom,
+                    targetZoomRef.current,
+                    smoothingFactorZoom
+                );
+                mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
+            }
+
             // Update pointer from hand tracking if available.
-            const leftHand = interactionStateRef.current.Left;
-            const rightHand = interactionStateRef.current.Right;
-            // Prefer Right hand cursor, fallback to Left hand.
             const handCursor = rightHand?.cursor || leftHand?.cursor;
             if (handCursor && mountRef.current) {
                 const rect = mountRef.current.getBoundingClientRect();
@@ -394,7 +448,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
             const hoveredMarkers = new Set<THREE.Object3D>();
             const pointers: THREE.Vector2[] = [];
             pointers.push(pointerRef.current);
-
             pointers.forEach((pointer) => {
                 raycaster.setFromCamera(pointer, camera);
                 const intersects = raycaster.intersectObjects(
@@ -405,8 +458,7 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
                     hoveredMarkers.add(intersect.object)
                 );
             });
-
-            const TOLERANCE = 0.2 * (zoom || 1);
+            const TOLERANCE = 0.05 * (zoom || 1);
             let closestMarker: THREE.Mesh | null = null;
             let minDistance = Infinity;
             pointers.forEach((pointer) => {
@@ -435,59 +487,6 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
             });
             hoveredMarkerRef.current =
                 minDistance < TOLERANCE ? closestMarker : null;
-
-            // ── Handle hand–gesture interactions (dual–pinch, single–pinch) ──
-            // (These sections remain commented out for now.)
-            /*
-      if (
-        leftHand.isPinching &&
-        rightHand.isPinching &&
-        leftHand.cursor &&
-        rightHand.cursor
-      ) {
-        const dx = rightHand.cursor.coords.x - leftHand.cursor.coords.x;
-        const dy = rightHand.cursor.coords.y - leftHand.cursor.coords.y;
-        const currentDistance = Math.sqrt(dx * dx + dy * dy);
-        if (previousPinchDistanceRef.current === null) {
-          previousPinchDistanceRef.current = currentDistance;
-        } else {
-          const distanceDelta =
-            currentDistance - previousPinchDistanceRef.current;
-          const zoomSensitivity = 0.005;
-          if (mainGroupRef.current) {
-            let currentZoom = mainGroupRef.current.scale.x;
-            currentZoom += distanceDelta * zoomSensitivity;
-            currentZoom = Math.max(0.5, Math.min(5, currentZoom));
-            mainGroupRef.current.scale.set(
-              currentZoom,
-              currentZoom,
-              currentZoom
-            );
-          }
-          previousPinchDistanceRef.current = currentDistance;
-        }
-        pinchPrevPosRef.current["Right"] = null;
-      } else if (rightHand.isPinching && rightHand.cursor) {
-        if (pinchPrevPosRef.current["Right"]) {
-          const prevPos = pinchPrevPosRef.current["Right"]!;
-          const deltaX = rightHand.cursor.coords.x - prevPos.x;
-          const deltaY = rightHand.cursor.coords.y - prevPos.y;
-          const rotationSensitivity = 0.005;
-          if (cameraRef.current) {
-            cameraRef.current.rotation.y += deltaX * rotationSensitivity;
-            cameraRef.current.rotation.x += deltaY * rotationSensitivity;
-          }
-        }
-        pinchPrevPosRef.current["Right"] = {
-          x: rightHand.cursor.coords.x,
-          y: rightHand.cursor.coords.y,
-        };
-        previousPinchDistanceRef.current = null;
-      } else {
-        pinchPrevPosRef.current["Right"] = null;
-        previousPinchDistanceRef.current = null;
-      }
-      */
 
             // Handle right-hand interactions.
             if (rightHand?.isHolding && rightHand.cursor) {
@@ -577,19 +576,15 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
     useEffect(() => {
         const element = mountRef.current;
         if (!element) return;
-
         const onMouseDown = (e: MouseEvent) => {
             cursorDown(e.clientX, e.clientY, "mouse");
         };
-
         const onMouseMove = (e: MouseEvent) => {
             cursorMove(e.clientX, e.clientY, "mouse");
         };
-
         const onMouseUp = () => {
             cursorUp();
         };
-
         // Add wheel event for zooming.
         const onWheel = (e: WheelEvent) => {
             e.preventDefault();
@@ -598,16 +593,16 @@ function Editable3DObject({ interactionState }: Editable3DObjectProps) {
                 let currentZoom = mainGroupRef.current.scale.x;
                 let newZoom = currentZoom - e.deltaY * sensitivity;
                 newZoom = Math.max(0.5, Math.min(5, newZoom));
+                // Update both the main group's scale and the target zoom.
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
+                targetZoomRef.current = newZoom;
             }
         };
-
         element.addEventListener("mousedown", onMouseDown);
         element.addEventListener("mousemove", onMouseMove);
         element.addEventListener("mouseup", onMouseUp);
         element.addEventListener("mouseleave", onMouseUp);
         element.addEventListener("wheel", onWheel, { passive: false });
-
         return () => {
             element.removeEventListener("mousedown", onMouseDown);
             element.removeEventListener("mousemove", onMouseMove);

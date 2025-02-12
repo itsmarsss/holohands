@@ -1,15 +1,15 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import "./Cursor.css";
-import { Coords } from "../../objects/coords";
+import { InteractionStateHand } from "../../objects/InteractionState";
 
 interface CursorProps {
     name: string;
-    coords: Coords;
+    hand: InteractionStateHand;
     overlayCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
 }
 
-function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
+function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
 
     // These refs track hover times and timers for simulated button hover.
@@ -23,13 +23,16 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     const progressRadius = 20; // Adjust as needed
 
     // NEW: A ref to store the target cursor position for smoothing.
-    const targetCursorRef = useRef({ x: coords.x, y: coords.y });
+    const targetCursorRef = useRef({
+        x: hand.cursor?.coords.x,
+        y: hand.cursor?.coords.y,
+    });
 
     // Whenever the coords prop changes, update the target.
     useEffect(() => {
-        targetCursorRef.current.x = coords.x;
-        targetCursorRef.current.y = coords.y;
-    }, [coords]);
+        targetCursorRef.current.x = hand.cursor?.coords.x || 0;
+        targetCursorRef.current.y = hand.cursor?.coords.y || 0;
+    }, [hand]);
 
     useEffect(() => {
         let animationFrameId: number;
@@ -57,15 +60,15 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
             const previousY = parseFloat(cursor.style.top) || targetY;
 
             // Smoothly interpolate toward the target using THREE.MathUtils.lerp.
-            const smoothingFactor = 0.3; // Adjust for the desired smoothness
+            const smoothingFactor = 0.2; // Adjust for the desired smoothness
             const newX = THREE.MathUtils.lerp(
-                previousX,
-                targetX,
+                previousX || 0,
+                targetX || 0,
                 smoothingFactor
             );
             const newY = THREE.MathUtils.lerp(
-                previousY,
-                targetY,
+                previousY || 0,
+                targetY || 0,
                 smoothingFactor
             );
 
@@ -151,17 +154,7 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
     return (
         <div className="cursor" id={name} ref={cursorRef}>
             {/* SVG for the progress indicator (positioned around the cursor) */}
-            <svg
-                className="cursor-progress"
-                viewBox="0 0 40 40"
-                style={{
-                    width: "40px",
-                    height: "40px",
-                    position: "absolute",
-                    top: "-15px", // Adjust so the circle centers around the cursor
-                    left: "-15px",
-                }}
-            >
+            <svg className="cursor-progress" viewBox="0 0 40 40">
                 <circle
                     className="cursor-progress-background"
                     cx="20"
@@ -184,6 +177,15 @@ function Cursor({ name, coords, overlayCanvasRef }: CursorProps) {
                     strokeDashoffset={2 * Math.PI * progressRadius}
                 />
             </svg>
+            <div className="cursor-status">
+                <p>
+                    {hand.isPinching
+                        ? "Pinching"
+                        : hand.isHolding
+                        ? "Holding"
+                        : "Idle"}
+                </p>
+            </div>
         </div>
     );
 }

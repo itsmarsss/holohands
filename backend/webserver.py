@@ -1,8 +1,6 @@
+import datetime
 import eventlet
-eventlet.monkey_patch()
-
-from flask import Flask, render_template, request, jsonify
-from flask_cors import CORS
+import orjson
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -10,9 +8,11 @@ import base64
 import json
 from eventlet import wsgi
 from eventlet.websocket import WebSocketWSGI
-from io import BytesIO
-from PIL import Image
-from scipy.spatial.distance import cosine
+from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
+from scipy.spatial.distance import cdist
+
+eventlet.monkey_patch()
 
 app = Flask(__name__)
 CORS(app)
@@ -22,8 +22,8 @@ mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=2,
-    min_detection_confidence=0.75,
-    min_tracking_confidence=0.75
+    min_detection_confidence=0.65,  # Lowered confidence threshold
+    min_tracking_confidence=0.65
 )
 
 # Store hand symbols
@@ -36,35 +36,26 @@ def index():
 @app.route('/save_handsymbol', methods=['POST'])
 def save_handsymbol():
     data = request.json
-    name = data['name']
-    handedness = data['handedness']
-    landmarks = data['landmarks']
-
-    # Normalize points in reference to the WRIST position (index 0)
+    name, handedness, landmarks = data['name'], data['handedness'], data['landmarks']
+    
     wrist = landmarks[0]
-    normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in landmarks]
-
-    # Rotate landmarks to a consistent orientation
+    normalized_landmarks = np.array(landmarks) - wrist  # Vectorized normalization
+    
     middle_finger_mcp = normalized_landmarks[9]
     angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
     rotation_matrix = np.array([
         [np.cos(-angle), -np.sin(-angle)],
         [np.sin(-angle), np.cos(-angle)]
     ])
-    rotated_landmarks = [(np.dot(rotation_matrix, [lm[0], lm[1]]).tolist() + [lm[2]]) for lm in normalized_landmarks]
-
-    # Flatten the normalized points into a 1-D array
-    flattened_landmarks = [coord for lm in rotated_landmarks for coord in lm]
-
-    # Store the normalized points in a 21 dimension vector
+    rotated_landmarks = np.hstack((normalized_landmarks[:, :2] @ rotation_matrix.T, normalized_landmarks[:, 2:]))
+    
     hand_symbols.append({
         'name': name,
         'handedness': handedness,
-        'landmarks': flattened_landmarks
+        'landmarks': rotated_landmarks.flatten()
     })
 
     return jsonify({'status': 'success'})
-
 
 @WebSocketWSGI
 def handle_websocket(ws):
@@ -74,69 +65,60 @@ def handle_websocket(ws):
             if message is None:
                 break
 
-
-            # Decode the base64 image directly with OpenCV
             img_data = base64.b64decode(message.split(",")[1])
             img_array = np.frombuffer(img_data, np.uint8)
-            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-
-            # Process frame
+            frame = cv2.imdecode(img_array, cv2.IMREAD_REDUCED_COLOR_2)  # Optimized decoding
+            frame = cv2.resize(frame, (640, 480))  # Downscale to 640x480
             h, w = frame.shape[:2]
-            
 
             results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            hands_data = []
-            # Limit to one hand per handedness (e.g., one left and one right)
-            detected = {"Left": False, "Right": False}
+            hands_data, detected = [], {"Left": False, "Right": False}
+
             if results.multi_hand_landmarks:
                 for idx, landmarks in enumerate(results.multi_hand_landmarks):
                     handedness = results.multi_handedness[idx].classification[0].label
-                    # If we've already processed a hand with this label, skip it
-                    if detected.get(handedness, False):
+                    if detected[handedness]:
                         continue
                     detected[handedness] = True
-                    connections = [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS]
-                    hand_landmarks = [[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark]
-
-                    # Normalize points in reference to the WRIST position (index 0)
+                    
+                    hand_landmarks = np.array([[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark])
                     wrist = hand_landmarks[0]
-                    normalized_landmarks = [(lm[0] - wrist[0], lm[1] - wrist[1], lm[2] - wrist[2]) for lm in hand_landmarks]
-
-                    # Rotate landmarks to a consistent orientation
+                    normalized_landmarks = hand_landmarks - wrist  # Vectorized normalization
+                    
                     middle_finger_mcp = normalized_landmarks[9]
                     angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
                     rotation_matrix = np.array([
                         [np.cos(-angle), -np.sin(-angle)],
-                        [np.sin(-angle), np.cos(-angle)]
+                        [np.sin(-angle),  np.cos(-angle)]
                     ])
-                    rotated_landmarks = [(np.dot(rotation_matrix, [lm[0], lm[1]]).tolist() + [lm[2]]) for lm in normalized_landmarks]
-
-                    # Flatten the normalized points into a 1-D array
-                    flattened_landmarks = [coord for lm in rotated_landmarks for coord in lm]
-
-                    # Check for matching symbols using cosine similarity
-                    similarities = []
-                    for symbol in hand_symbols:
-                        if symbol['handedness'] == handedness:
-                            similarity = 1 - cosine(flattened_landmarks, symbol['landmarks'])
-                            similarities.append((symbol['name'], similarity))
-
-                    # Sort similarities from highest to least
-                    similarities.sort(key=lambda x: x[1], reverse=True)
-
+                    rotated_landmarks = np.hstack((normalized_landmarks[:, :2] @ rotation_matrix.T, normalized_landmarks[:, 2:]))
+                    flattened_landmarks = rotated_landmarks.flatten()
+                    
+                    if hand_symbols:
+                        symbol_landmarks = np.array([
+                            symbol['landmarks']
+                            for symbol in hand_symbols if symbol['handedness'] == handedness
+                        ])
+                        if len(symbol_landmarks) > 0:
+                            similarities = (1 - cdist([flattened_landmarks], symbol_landmarks, metric='cosine')[0]).tolist()
+                            detected_symbols = sorted(
+                                zip([s['name'] for s in hand_symbols if s['handedness'] == handedness], similarities),
+                                key=lambda x: x[1],
+                                reverse=True
+                            )
+                        else:
+                            detected_symbols = []
+                    else:
+                        detected_symbols = []
+                    
                     hands_data.append({
                         'handedness': handedness,
-                        'landmarks': hand_landmarks,
-                        'connections': connections,
-                        'detected_symbols': similarities
+                        'landmarks': hand_landmarks.round(3).tolist(),
+                        'connections': [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS],
+                        'detected_symbols': detected_symbols[:3]  # Send only top 3 matches
                     })
-
-            # Send hand landmarks data
-            ws.send(json.dumps({
-                'hands': hands_data,
-                'image_size': {'width': w, 'height': h}
-            }))
+            print(datetime.datetime.now().strftime("%H:%M:%S") + " returned")
+            ws.send(orjson.dumps({'hands': hands_data, 'image_size': {'width': w, 'height': h}}))
 
     except Exception as e:
         print("WebSocket error:", str(e))

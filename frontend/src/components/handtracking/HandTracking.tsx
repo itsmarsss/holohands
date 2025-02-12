@@ -14,6 +14,7 @@ import { useVideoStream } from "../../provider/VideoStreamContext";
 import {
     InteractionState,
     DEFAULT_INTERACTION_STATE,
+    InteractionStateHand,
 } from "../../objects/InteractionState";
 import Cursors from "../cursor/Cursors";
 
@@ -67,9 +68,13 @@ function HandTracking() {
 
     // Function to calculate button column offset based on cursor positions
     const calculateButtonColumnOffset = () => {
-        const leftCursorX = interactionStateRef.current.Left?.cursor?.coords.x;
-        const rightCursorX =
-            interactionStateRef.current.Right?.cursor?.coords.x;
+        const leftCursor = interactionStateRef.current
+            .Left as InteractionStateHand;
+        const rightCursor = interactionStateRef.current
+            .Right as InteractionStateHand;
+
+        const leftCursorX = leftCursor?.cursor?.coords.x;
+        const rightCursorX = rightCursor?.cursor?.coords.x;
 
         // Check if cursors are within 250px of the left or right borders
         const canvasWidth = overlayCanvasRef.current?.offsetWidth;
@@ -81,7 +86,8 @@ function HandTracking() {
             currentHandsDataRef.current.some(
                 (hand) => hand.handedness === "Left"
             ) &&
-            leftCursorX
+            leftCursorX &&
+            !leftCursor.isPinching
         ) {
             if (leftCursorX <= 200) {
                 leftPeek = leftPeek || true;
@@ -102,7 +108,8 @@ function HandTracking() {
             currentHandsDataRef.current.some(
                 (hand) => hand.handedness === "Right"
             ) &&
-            rightCursorX
+            rightCursorX &&
+            !rightCursor.isHolding
         ) {
             if (canvasWidth) {
                 if (rightCursorX >= canvasWidth - 200) {
@@ -138,7 +145,7 @@ function HandTracking() {
             if (cameras.length > 0) {
                 console.log("Available cameras:");
                 cameras.forEach((camera, index) => {
-                    console.log(`${index}: ${camera.label}`);
+                    console.log(`\t${index}: ${camera.label}`);
                 });
                 setVideoDevices(cameras);
                 // Select a default camera (if 2nd available, otherwise first).
@@ -171,7 +178,7 @@ function HandTracking() {
             return null;
         }
 
-        console.log("Captured frame:", capturedFrame.length);
+        // console.log("Captured frame:", capturedFrame.length);
         return capturedFrame;
     };
 
@@ -183,18 +190,18 @@ function HandTracking() {
             const capturedFrame = acknowledgeFrameTask();
 
             if (!capturedFrame) {
-                console.log("Failed to capture frame.");
+                // console.log("Failed to capture frame.");
                 return;
             }
 
             const sent = videoStreamTask(capturedFrame);
 
             if (!sent) {
-                console.log("Failed to send frame via websocket.");
+                // console.log("Failed to send frame via websocket.");
                 return;
             }
 
-            console.log("Sent frame via websocket:", capturedFrame.length);
+            // console.log("Sent frame via websocket:", capturedFrame.length);
 
             const canvas = overlayCanvasRef.current;
             if (!canvas) {
@@ -223,6 +230,7 @@ function HandTracking() {
             if (debug) {
                 drawStrokes(ctx);
             }
+
             calculateButtonColumnOffset();
 
             frameCountRef.current = frameCountRef.current + 1;

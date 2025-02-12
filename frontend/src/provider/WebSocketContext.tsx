@@ -77,7 +77,7 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
                 if (data) {
                     dataRef.current = data;
                     acknowledgedRef.current = true;
-                    console.log("Acknowledged frame.");
+                    // console.log("Acknowledged frame.");
                 }
             } catch (error) {
                 console.error("Error parsing websocket message:", error);

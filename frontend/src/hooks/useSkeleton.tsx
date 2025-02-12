@@ -122,16 +122,13 @@ function useSkeleton({
         debugRef.current = debug;
     }, [debug]);
 
-    const paintHands = useCallback(
+    const paintHandConnections = useCallback(
         (
             hand: Hand,
             scaleX: number,
             scaleY: number,
             ctx: CanvasRenderingContext2D
         ) => {
-            if (!debugRef.current) {
-                return;
-            }
             ctx.strokeStyle = HAND_COLORS[hand.handedness];
             ctx.lineWidth = 3;
             ctx.globalAlpha = 0.8;
@@ -335,7 +332,10 @@ function useSkeleton({
             const cursorY = ((indexFinger[1] + thumbFinger[1]) / 2) * scaleY;
 
             // Paint hand connections
-            paintHands(hand, scaleX, scaleY, ctx);
+
+            if (debugRef.current) {
+                paintHandConnections(hand, scaleX, scaleY, ctx);
+            }
 
             // Paint index-thumb connection
             if (debugRef.current) {
@@ -515,7 +515,7 @@ function useSkeleton({
             updateInteractionState,
             calculateHolding,
             calculatePinching,
-            paintHands,
+            paintHandConnections,
             paintConnection,
             debugText,
         ]

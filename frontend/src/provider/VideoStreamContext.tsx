@@ -55,7 +55,7 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
     }, []);
 
     useEffect(() => {
-        console.log("Stream status:", streamStatusRef.current);
+        // console.log("Stream status:", streamStatusRef.current);
     }, [streamStatusRef.current]);
 
     const getAvailableCameras = useCallback(async (): Promise<

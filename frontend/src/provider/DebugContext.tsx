@@ -1,4 +1,4 @@
-import { createContext, MutableRefObject, useContext, useRef } from "react";
+import { createContext, useContext, useState } from "react";
 
 interface DebugContextProviderProps {
     children: React.ReactNode;
@@ -6,7 +6,8 @@ interface DebugContextProviderProps {
 }
 
 interface DebugContextType {
-    getDebug: () => MutableRefObject<boolean>;
+    debug: boolean;
+    setDebug: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const DebugContext = createContext<DebugContextType | null>(null);
@@ -15,10 +16,11 @@ export function DebugContextProvider({
     children,
     defaultDebug,
 }: DebugContextProviderProps) {
-    const debug = useRef(defaultDebug);
+    const [debug, setDebug] = useState(defaultDebug);
 
     const debugContextValue: DebugContextType = {
-        getDebug: () => debug,
+        debug,
+        setDebug,
     };
 
     return (

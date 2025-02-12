@@ -16,9 +16,9 @@ interface WebSocketProps {
 interface WebSocketContextType {
     getWebSocket: () => WebSocket | null;
     getStatus: () => SocketStatus;
-    sendFrame: (frame: string) => void;
+    sendFrame: (frame: string) => boolean;
     getAcknowledged: () => boolean;
-    getData: () => JSON | null;
+    getData: () => object | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -28,7 +28,8 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     const connectionStatusRef = useRef<SocketStatus>("Connecting...");
     const retryTimeoutRef = useRef<number | null>(null);
     const acknowledgedRef = useRef<boolean>(false);
-    const dataRef = useRef<JSON | null>(null);
+    const dataRef = useRef<object | null>(null);
+    const fallbackCounterRef = useRef<number>(0);
 
     const connect = () => {
         connectionStatusRef.current = "Connecting...";
@@ -61,6 +62,27 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
             connectionStatusRef.current = "Error";
             ws.close();
         };
+
+        ws.onmessage = async (event) => {
+            let messageText = "";
+            if (typeof event.data === "string") {
+                messageText = event.data;
+            } else if (event.data instanceof Blob) {
+                messageText = await event.data.text();
+            }
+
+            try {
+                const data = JSON.parse(messageText);
+                // console.log("Received data from websocket:", data);
+                if (data) {
+                    dataRef.current = data;
+                    acknowledgedRef.current = true;
+                    console.log("Acknowledged frame.");
+                }
+            } catch (error) {
+                console.error("Error parsing websocket message:", error);
+            }
+        };
     };
 
     const retryConnection = () => {
@@ -76,7 +98,17 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         if (!wsRef.current) {
             connect();
         }
+
+        const fallbackTimeout = setInterval(() => {
+            fallbackCounterRef.current += 66;
+            if (fallbackCounterRef.current > 5000) {
+                acknowledgedRef.current = true;
+                fallbackCounterRef.current = 0;
+            }
+        }, 66);
+
         return () => {
+            clearInterval(fallbackTimeout);
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
@@ -84,11 +116,15 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         };
     }, []);
 
-    const sendFrame = (frame: string) => {
-        if (wsRef.current) {
-            wsRef.current.send(frame);
-            acknowledgedRef.current = false;
+    const sendFrame = (frame: string): boolean => {
+        if (!wsRef.current) {
+            return false;
         }
+
+        wsRef.current.send(frame);
+        acknowledgedRef.current = false;
+
+        return true;
     };
 
     const websocketContextValue = useMemo(

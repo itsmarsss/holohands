@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { Hand } from "../../objects/hand";
 import {
+    DEFAULT_INTERACTION_STATE,
     DEFAULT_INTERACTION_STATE_HAND,
     InteractionState,
 } from "../../objects/InteractionState";
@@ -16,29 +18,39 @@ function Cursors({
     interactionStateRef,
     overlayCanvasRef,
 }: CursorsProps) {
+    const [currentHandsData, setCurrentHandsData] = useState<Hand[]>(
+        currentHandsDataRef.current
+    );
+    const [interactionState, setInteractionState] = useState<InteractionState>(
+        interactionStateRef.current
+    );
+
+    useEffect(() => {
+        setInterval(() => {
+            setCurrentHandsData(currentHandsDataRef.current);
+            setInteractionState(interactionStateRef.current);
+        }, 33);
+    }, []);
+
     return (
         <>
-            {currentHandsDataRef.current.some(
-                (hand) => hand.handedness === "Left"
-            ) && (
+            {currentHandsData.some((hand) => hand.handedness === "Left") && (
                 <Cursor
                     name="leftCursor"
                     hand={
-                        interactionStateRef.current.Left
-                            ? interactionStateRef.current.Left
+                        interactionState.Left
+                            ? interactionState.Left
                             : DEFAULT_INTERACTION_STATE_HAND
                     }
                     overlayCanvasRef={overlayCanvasRef}
                 />
             )}
-            {currentHandsDataRef.current.some(
-                (hand) => hand.handedness === "Right"
-            ) && (
+            {currentHandsData.some((hand) => hand.handedness === "Right") && (
                 <Cursor
                     name="rightCursor"
                     hand={
-                        interactionStateRef.current.Right
-                            ? interactionStateRef.current.Right
+                        interactionState.Right
+                            ? interactionState.Right
                             : DEFAULT_INTERACTION_STATE_HAND
                     }
                     overlayCanvasRef={overlayCanvasRef}

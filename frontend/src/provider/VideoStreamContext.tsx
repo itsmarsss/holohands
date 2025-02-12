@@ -133,7 +133,6 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
 
     const videoStreamContextValue = useMemo(
         () => ({
-            // Accessor functions to read the mutable refs.
             getStatus: () => streamStatusRef.current,
             getStream: () => streamRef.current,
             videoRef,

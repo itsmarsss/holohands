@@ -18,16 +18,15 @@ import {
 import Cursors from "../cursor/Cursors";
 
 function HandTracking() {
-    const [fps, setFps] = useState<number>(0);
-    const [frameCount, setFrameCount] = useState<number>(0);
-    const [lastTime, setLastTime] = useState<number>(Date.now());
+    const fpsRef = useRef<number>(0);
+    const frameCountRef = useRef<number>(0);
+    const lastTimeRef = useRef<number>(Date.now());
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     // Add a debug toggle state.
-    const debugContext = useDebug();
-    const debugRef = debugContext.getDebug();
+    const { debug } = useDebug();
 
     const interactionStateRef = useRef<InteractionState>(
         DEFAULT_INTERACTION_STATE
@@ -38,10 +37,9 @@ function HandTracking() {
     };
 
     // Pass the new onPinchMove callback into useSkeleton along with updateCursorPosition.
-    const { drawHands, drawStrokes } = useSkeleton({
+    const { processHands, drawStrokes } = useSkeleton({
         overlayCanvasRef,
-        debug: debugRef.current,
-        fps,
+        fpsRef,
         updateInteractionState,
     });
 
@@ -156,108 +154,84 @@ function HandTracking() {
         });
     };
 
-    const setupWebsocketTask = (websocket: WebSocket) => {
-        console.log("Setting up websocket task.");
-        const handleMessage = async (message: MessageEvent) => {
-            console.log("Received message from websocket");
-            let messageText = "";
-            if (typeof message.data === "string") {
-                messageText = message.data;
-            } else if (message.data instanceof Blob) {
-                messageText = await message.data.text();
-            }
-            try {
-                const data = JSON.parse(messageText);
-                // console.log("Received data from websocket:", data);
-                if (data.hands) {
-                    currentHandsDataRef.current = data.hands;
-                    acknowledgedRef.current = true;
-                    console.log("Acknowledged frame.");
-                }
-            } catch (error) {
-                console.error("Error parsing websocket message:", error);
-            }
-        };
+    const videoStreamTask = (frame: string): boolean => {
+        const payload = JSON.stringify({ image: frame });
 
-        websocket.addEventListener("message", handleMessage);
+        return webSocketContext.sendFrame(payload);
     };
-
-    const videoStreamTask = (frame: string) => {
-        const websocket = webSocketContext.getWebSocket();
-        // console.log("Frame:", frame?.length);
-        if (frame && videoStreamContext.getStatus() === "streaming") {
-            if (websocket && websocket.readyState === WebSocket.OPEN) {
-                const payload = JSON.stringify({ image: frame });
-                webSocketContext.sendFrame(payload);
-                console.log("Sent frame via websocket:", frame.length);
-            } else {
-                console.log("WebSocket not open. Frame not sent.");
-            }
-        } else {
-            console.log("No frame to send.");
-        }
-    };
-
-    const fallbackCounter = useRef<number>(0);
 
     const acknowledgeFrameTask = (): string | null => {
-        fallbackCounter.current += 33;
-
-        // Use a mutable ref so that we do not trigger re-renders.
-        if (!acknowledgedRef.current && fallbackCounter.current > 5000) {
-            acknowledgedRef.current = true;
-            fallbackCounter.current = 0;
+        if (!webSocketContext.getAcknowledged()) {
+            return null;
         }
 
-        if (
-            acknowledgedRef.current &&
-            videoStreamContext.getStatus() === "streaming"
-        ) {
-            const capturedFrame = captureFrame();
-            if (capturedFrame?.length && capturedFrame.length > 100) {
-                console.log("Captured frame:", capturedFrame.length);
+        const capturedFrame = captureFrame();
 
-                acknowledgedRef.current = false;
-                fallbackCounter.current = 0;
-                return capturedFrame;
-            } else {
-                console.log("Failed to capture frame.");
-            }
+        if (!capturedFrame || capturedFrame.length < 100) {
+            return null;
         }
 
-        return null;
+        console.log("Captured frame:", capturedFrame.length);
+        return capturedFrame;
     };
-
-    const websocketWatch = useRef<WebSocket | null>(null);
-
-    useEffect(() => {
-        if (
-            webSocketContext.getStatus() === "Connected" &&
-            websocketWatch.current
-        ) {
-            setupWebsocketTask(websocketWatch.current);
-        }
-    }, []);
 
     useEffect(() => {
         setupVideoStreamTask();
 
         // Run the master loop once using a setInterval.
         const masterLoop = setInterval(() => {
-            websocketWatch.current = webSocketContext.getWebSocket();
-
             const capturedFrame = acknowledgeFrameTask();
-            if (capturedFrame) {
-                videoStreamTask(capturedFrame);
 
-                setFrameCount(frameCount + 1);
-                const now = Date.now();
-                const delta = now - lastTime;
-                if (delta >= 1000) {
-                    setFps(frameCount);
-                    setFrameCount(0);
-                    setLastTime(now);
-                }
+            if (!capturedFrame) {
+                console.log("Failed to capture frame.");
+                return;
+            }
+
+            const sent = videoStreamTask(capturedFrame);
+
+            if (!sent) {
+                console.log("Failed to send frame via websocket.");
+                return;
+            }
+
+            console.log("Sent frame via websocket:", capturedFrame.length);
+
+            const canvas = overlayCanvasRef.current;
+            if (!canvas) {
+                return;
+            }
+
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+                return;
+            }
+
+            const data = webSocketContext.getData();
+            if (!data || !("hands" in data)) {
+                return;
+            }
+
+            currentHandsDataRef.current = data["hands"] as Hand[];
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Use the fixed reference size.
+            const imageSize = { width: 640, height: 360 };
+
+            // Draw each hand
+            processHands(currentHandsDataRef.current, imageSize, ctx);
+            // Draw any strokes accumulated (if in debug mode)
+            if (debug) {
+                drawStrokes(ctx);
+            }
+            calculateButtonColumnOffset();
+
+            frameCountRef.current = frameCountRef.current + 1;
+            const now = Date.now();
+            const delta = now - lastTimeRef.current;
+            if (delta >= 1000) {
+                fpsRef.current = frameCountRef.current;
+                frameCountRef.current = 0;
+                lastTimeRef.current = now;
             }
         }, 66);
 
@@ -298,29 +272,6 @@ function HandTracking() {
             resizeObserver.disconnect();
         };
     }, [resizeCanvases]);
-
-    useEffect(() => {
-        const draw = () => {
-            const canvas = overlayCanvasRef.current;
-            if (!canvas) return;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
-            // Clear the canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // Use the fixed reference size.
-            const imageSize = { width: 640, height: 360 };
-            // Draw each hand
-            drawHands(currentHandsDataRef.current, imageSize, ctx);
-            // Draw any strokes accumulated (if in debug mode)
-            if (debugRef.current) {
-                drawStrokes(ctx);
-            }
-            calculateButtonColumnOffset();
-        };
-        const animationFrameId = requestAnimationFrame(draw);
-
-        return () => cancelAnimationFrame(animationFrameId);
-    }, [currentHandsDataRef, drawHands, drawStrokes]);
 
     return (
         <div ref={containerRef} className="handtracking-container">

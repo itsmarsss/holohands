@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Stroke } from "../objects/stroke";
 import { Hand, HAND_COLORS } from "../objects/hand";
 import {
@@ -7,7 +7,7 @@ import {
     InteractionStateHand,
 } from "../objects/InteractionState";
 import { Coords } from "../objects/coords";
-
+import { useDebug } from "../provider/DebugContext";
 interface ImageSize {
     width: number;
     height: number;
@@ -48,15 +48,13 @@ const smoothValue = (
 
 interface UseSkeletonProps {
     overlayCanvasRef: React.RefObject<HTMLCanvasElement>;
-    debug?: boolean;
-    fps: number;
+    fpsRef: React.MutableRefObject<number>;
     updateInteractionState: (interactionState: InteractionState) => void;
 }
 
 function useSkeleton({
     overlayCanvasRef,
-    debug = false,
-    fps,
+    fpsRef,
     updateInteractionState,
 }: UseSkeletonProps) {
     const previousPointerAngle = useRef<number | null>(null);
@@ -116,6 +114,14 @@ function useSkeleton({
     });
     // ───────────────────────────────────────────────────────────────────────────
 
+    const { debug } = useDebug();
+
+    // Create a mutable ref for debug that updates whenever the context value changes.
+    const debugRef = useRef(debug);
+    useEffect(() => {
+        debugRef.current = debug;
+    }, [debug]);
+
     const paintHands = useCallback(
         (
             hand: Hand,
@@ -123,7 +129,7 @@ function useSkeleton({
             scaleY: number,
             ctx: CanvasRenderingContext2D
         ) => {
-            if (!debug) {
+            if (!debugRef.current) {
                 return;
             }
             ctx.strokeStyle = HAND_COLORS[hand.handedness];
@@ -151,7 +157,7 @@ function useSkeleton({
                 ctx.fill();
             });
         },
-        [debug]
+        []
     );
 
     const paintConnection = useCallback(
@@ -289,12 +295,12 @@ function useSkeleton({
 
     const debugText = useCallback(
         (x: number, y: number, text: string, ctx: CanvasRenderingContext2D) => {
-            if (!debug) return;
+            if (!debugRef.current) return;
             ctx.fillStyle = "#FFFFFF";
             ctx.font = "16px Arial";
             ctx.fillText(text, x, y);
         },
-        [debug]
+        []
     );
     const drawText = useCallback(
         (x: number, y: number, text: string, ctx: CanvasRenderingContext2D) => {
@@ -332,7 +338,7 @@ function useSkeleton({
             paintHands(hand, scaleX, scaleY, ctx);
 
             // Paint index-thumb connection
-            if (debug) {
+            if (debugRef.current) {
                 paintConnection(indexFinger, thumbFinger, scaleX, scaleY, ctx);
             }
 
@@ -393,7 +399,7 @@ function useSkeleton({
             const handSide: "Left" | "Right" = hand.handedness;
             if (isHolding !== committedHolding.current[handSide]) {
                 // If the new computed value differs from our committed value,
-                // start a timer (if one isn’t already running) to update after 50ms.
+                // start a timer (if one isn't already running) to update after 50ms.
                 if (!holdingTimer.current[handSide]) {
                     holdingTimer.current[handSide] = window.setTimeout(() => {
                         committedHolding.current[handSide] = isHolding;
@@ -473,8 +479,10 @@ function useSkeleton({
             if (hand.detected_symbols && hand.detected_symbols.length > 0) {
                 hand.detected_symbols.forEach((symbol, index) => {
                     debugText(
-                        debug ? wrist[0] * scaleX : cursorX,
-                        (debug ? wrist[1] * scaleY : cursorY) + 20 + index * 20,
+                        debugRef.current ? wrist[0] * scaleX : cursorX,
+                        (debugRef.current ? wrist[1] * scaleY : cursorY) +
+                            20 +
+                            index * 20,
                         `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
                         ctx
                     );
@@ -502,7 +510,7 @@ function useSkeleton({
             ctx.restore();
         },
         [
-            debug,
+            debugRef,
             overlayCanvasRef,
             updateInteractionState,
             calculateHolding,
@@ -513,7 +521,7 @@ function useSkeleton({
         ]
     );
 
-    const drawHands = useCallback(
+    const processHands = useCallback(
         (
             hands: Hand[],
             imageSize: ImageSize,
@@ -551,9 +559,12 @@ function useSkeleton({
 
             updateInteractionState(interactionStateRef.current);
 
-            debugText(10, 10, `FPS: ${fps}`, ctx);
+            // Use latest debug value from debugRef.
+            if (debugRef.current) {
+                debugText(10, 10, `FPS: ${fpsRef.current}`, ctx);
+            }
         },
-        [debug, overlayCanvasRef, updateInteractionState, drawHand, fps]
+        [overlayCanvasRef, updateInteractionState, drawHand, fpsRef]
     );
 
     // Draw each stroke separately from the global strokes array.
@@ -584,7 +595,7 @@ function useSkeleton({
     }, []);
 
     // Return the necessary drawing functions
-    return { drawHands, drawStrokes };
+    return { processHands, drawStrokes };
 }
 
 export default useSkeleton;

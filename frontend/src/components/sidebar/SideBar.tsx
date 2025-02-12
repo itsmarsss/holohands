@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./SideBar.css";
 import { useDebug } from "../../provider/DebugContext";
 import MiniDisplay from "../minidisplay/MiniDisplay";
@@ -9,8 +9,7 @@ const SideBar: React.FC = () => {
         setIsExtended((prev) => !prev); // Toggle the state
     };
 
-    const debugContext = useDebug();
-    const debug = debugContext.getDebug();
+    const { debug, setDebug } = useDebug();
 
     return (
         <>
@@ -34,10 +33,10 @@ const SideBar: React.FC = () => {
                         <label>
                             <input
                                 type="checkbox"
-                                checked={debug.current}
-                                onChange={(e) =>
-                                    (debug.current = e.target.checked)
-                                }
+                                checked={debug}
+                                onChange={(e) => {
+                                    setDebug(e.target.checked);
+                                }}
                             />
                             Debug
                         </label>

@@ -59,69 +59,80 @@ def save_handsymbol():
 
 @WebSocketWSGI
 def handle_websocket(ws):
-    try:
-        while True:
-            message = ws.wait()
-            if message is None:
-                break
+    while True:
+        message = ws.wait()
+        if message is None:
+            break
+        try:
+            # Check if the message is binary data (ArrayBuffer sent from the client)
+            if isinstance(message, bytes):
+                frame_bytes = message
+            else:
+                # Fallback for legacy support: assume message is JSON with a Base64-encoded image.
+                payload = json.loads(message)
+                image_data = payload.get("image", "")
+                if image_data.startswith("data:image"):
+                    header, encoded = image_data.split(",", 1)
+                    frame_bytes = base64.b64decode(encoded)
+                else:
+                    frame_bytes = None
 
-            img_data = base64.b64decode(message.split(",")[1])
-            img_array = np.frombuffer(img_data, np.uint8)
-            frame = cv2.imdecode(img_array, cv2.IMREAD_REDUCED_COLOR_2)  # Optimized decoding
-            frame = cv2.resize(frame, (640, 480))  # Downscale to 640x480
-            h, w = frame.shape[:2]
+            if frame_bytes is not None:
+                np_arr = np.frombuffer(frame_bytes, np.uint8)
+                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                frame = cv2.resize(frame, (640, 480))  # Downscale to 640x480
+                h, w = frame.shape[:2]
 
-            results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            hands_data, detected = [], {"Left": False, "Right": False}
+                results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                hands_data, detected = [], {"Left": False, "Right": False}
 
-            if results.multi_hand_landmarks:
-                for idx, landmarks in enumerate(results.multi_hand_landmarks):
-                    handedness = results.multi_handedness[idx].classification[0].label
-                    if detected[handedness]:
-                        continue
-                    detected[handedness] = True
-                    
-                    hand_landmarks = np.array([[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark])
-                    wrist = hand_landmarks[0]
-                    normalized_landmarks = hand_landmarks - wrist  # Vectorized normalization
-                    
-                    middle_finger_mcp = normalized_landmarks[9]
-                    angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
-                    rotation_matrix = np.array([
-                        [np.cos(-angle), -np.sin(-angle)],
-                        [np.sin(-angle),  np.cos(-angle)]
-                    ])
-                    rotated_landmarks = np.hstack((normalized_landmarks[:, :2] @ rotation_matrix.T, normalized_landmarks[:, 2:]))
-                    flattened_landmarks = rotated_landmarks.flatten()
-                    
-                    if hand_symbols:
-                        symbol_landmarks = np.array([
-                            symbol['landmarks']
-                            for symbol in hand_symbols if symbol['handedness'] == handedness
+                if results.multi_hand_landmarks:
+                    for idx, landmarks in enumerate(results.multi_hand_landmarks):
+                        handedness = results.multi_handedness[idx].classification[0].label
+                        if detected[handedness]:
+                            continue
+                        detected[handedness] = True
+                        
+                        hand_landmarks = np.array([[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark])
+                        wrist = hand_landmarks[0]
+                        normalized_landmarks = hand_landmarks - wrist  # Vectorized normalization
+                        
+                        middle_finger_mcp = normalized_landmarks[9]
+                        angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
+                        rotation_matrix = np.array([
+                            [np.cos(-angle), -np.sin(-angle)],
+                            [np.sin(-angle),  np.cos(-angle)]
                         ])
-                        if len(symbol_landmarks) > 0:
-                            similarities = (1 - cdist([flattened_landmarks], symbol_landmarks, metric='cosine')[0]).tolist()
-                            detected_symbols = sorted(
-                                zip([s['name'] for s in hand_symbols if s['handedness'] == handedness], similarities),
-                                key=lambda x: x[1],
-                                reverse=True
-                            )
+                        rotated_landmarks = np.hstack((normalized_landmarks[:, :2] @ rotation_matrix.T, normalized_landmarks[:, 2:]))
+                        flattened_landmarks = rotated_landmarks.flatten()
+                        
+                        if hand_symbols:
+                            symbol_landmarks = np.array([
+                                symbol['landmarks']
+                                for symbol in hand_symbols if symbol['handedness'] == handedness
+                            ])
+                            if len(symbol_landmarks) > 0:
+                                similarities = (1 - cdist([flattened_landmarks], symbol_landmarks, metric='cosine')[0]).tolist()
+                                detected_symbols = sorted(
+                                    zip([s['name'] for s in hand_symbols if s['handedness'] == handedness], similarities),
+                                    key=lambda x: x[1],
+                                    reverse=True
+                                )
+                            else:
+                                detected_symbols = []
                         else:
                             detected_symbols = []
-                    else:
-                        detected_symbols = []
-                    
-                    hands_data.append({
-                        'handedness': handedness,
-                        'landmarks': hand_landmarks.round(3).tolist(),
-                        'connections': [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS],
-                        'detected_symbols': detected_symbols[:3]  # Send only top 3 matches
-                    })
-            print(datetime.datetime.now().strftime("%H:%M:%S") + " returned")
-            ws.send(orjson.dumps({'hands': hands_data, 'image_size': {'width': w, 'height': h}}))
-
-    except Exception as e:
-        print("WebSocket error:", str(e))
+                        
+                        hands_data.append({
+                            'handedness': handedness,
+                            'landmarks': hand_landmarks.round(3).tolist(),
+                            'connections': [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS],
+                            'detected_symbols': detected_symbols[:3]  # Send only top 3 matches
+                        })
+                print(datetime.datetime.now().strftime("%H:%M:%S") + " returned")
+                ws.send(orjson.dumps({'hands': hands_data, 'image_size': {'width': w, 'height': h}}))
+        except Exception as e:
+            print("WebSocket error:", str(e))
 
 def combined_app(environ, start_response):
     path = environ['PATH_INFO']

@@ -29,7 +29,7 @@ function Cursors({
         setInterval(() => {
             setCurrentHandsData(currentHandsDataRef.current);
             setInteractionState(interactionStateRef.current);
-        }, 33);
+        }, 66);
     }, []);
 
     return (

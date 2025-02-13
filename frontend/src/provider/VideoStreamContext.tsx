@@ -15,7 +15,7 @@ interface VideoStreamProps {
 interface VideoStreamContextType {
     videoRef: React.RefObject<HTMLVideoElement>;
     getAvailableCameras: () => Promise<MediaDeviceInfo[]>;
-    captureFrame: () => string | null;
+    captureFrame: () => Promise<ArrayBuffer | null>;
     setActiveCamera: (cameraId: string) => void;
     getStatus: () => StreamStatus;
     getStream: () => MediaStream | null;
@@ -106,21 +106,21 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
         }
     };
 
-    const captureFrame = (): string | null => {
+    const captureFrame = async (): Promise<ArrayBuffer | null> => {
         if (!videoRef.current) {
             console.error("Video reference is null.");
             return null;
         }
         const canvas = document.createElement("canvas");
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
         const context = canvas.getContext("2d");
         if (!context) {
             console.error("Failed to get canvas context.");
             return null;
         }
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
+        // Mirror the video horizontally.
         context.scale(-1, 1);
-
         context.drawImage(
             videoRef.current,
             -canvas.width,
@@ -128,7 +128,30 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
             canvas.width,
             canvas.height
         );
-        return canvas.toDataURL("image/png", 0.5);
+        // Instead of a data URL, capture a JPEG blob and convert it to an ArrayBuffer.
+        return new Promise((resolve) => {
+            canvas.toBlob(
+                (blob) => {
+                    if (blob) {
+                        blob.arrayBuffer()
+                            .then((buffer) => {
+                                resolve(buffer);
+                            })
+                            .catch((err) => {
+                                console.error(
+                                    "Blob to ArrayBuffer conversion error:",
+                                    err
+                                );
+                                resolve(null);
+                            });
+                    } else {
+                        resolve(null);
+                    }
+                },
+                "image/jpeg",
+                0.5
+            );
+        });
     };
 
     const videoStreamContextValue = useMemo(

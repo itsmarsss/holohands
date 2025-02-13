@@ -48,7 +48,7 @@ function Editable3DObject({
         setInterval(() => {
             interactionStateRef.current = interactionState.current;
             // console.log("Interaction state:", interactionStateRef.current);
-        }, 33);
+        }, 66);
     }, []);
 
     // Refs for computing gesture deltas.

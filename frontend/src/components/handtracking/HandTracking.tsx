@@ -161,89 +161,84 @@ function HandTracking() {
         });
     };
 
-    const videoStreamTask = (frame: string): boolean => {
-        const payload = JSON.stringify({ image: frame });
-
-        return webSocketContext.sendFrame(payload);
+    const videoStreamTask = (frame: ArrayBuffer): boolean => {
+        // Directly send the binary frame data via WebSocket.
+        return webSocketContext.sendFrame(frame);
     };
 
-    const acknowledgeFrameTask = (): string | null => {
+    const acknowledgeFrameTask = async (): Promise<ArrayBuffer | null> => {
         if (!webSocketContext.getAcknowledged()) {
             return null;
         }
 
-        const capturedFrame = captureFrame();
+        const capturedFrame = await captureFrame();
 
-        if (!capturedFrame || capturedFrame.length < 100) {
+        if (!capturedFrame || capturedFrame.byteLength < 100) {
             return null;
         }
 
-        // console.log("Captured frame:", capturedFrame.length);
+        // console.log("Captured frame (byteLength):", capturedFrame.byteLength);
         return capturedFrame;
     };
 
     useEffect(() => {
         setupVideoStreamTask();
 
-        // Run the master loop once using a setInterval.
-        const masterLoop = setInterval(() => {
-            const capturedFrame = acknowledgeFrameTask();
+        let animationFrameId: number;
 
-            if (!capturedFrame) {
-                // console.log("Failed to capture frame.");
-                return;
+        const masterLoop = async () => {
+            const capturedFrame = await acknowledgeFrameTask();
+
+            if (capturedFrame) {
+                const sent = videoStreamTask(capturedFrame);
+
+                if (sent) {
+                    const canvas = overlayCanvasRef.current;
+                    if (canvas) {
+                        const ctx = canvas.getContext("2d");
+                        if (ctx) {
+                            const data = webSocketContext.getData();
+                            if (data && "hands" in data) {
+                                currentHandsDataRef.current = data[
+                                    "hands"
+                                ] as Hand[];
+                                ctx.clearRect(
+                                    0,
+                                    0,
+                                    canvas.width,
+                                    canvas.height
+                                );
+                                const imageSize = { width: 640, height: 360 };
+                                processHands(
+                                    currentHandsDataRef.current,
+                                    imageSize,
+                                    ctx
+                                );
+                                if (debug) {
+                                    drawStrokes(ctx);
+                                }
+                                calculateButtonColumnOffset();
+                            }
+                        }
+                    }
+
+                    frameCountRef.current += 1;
+                    const now = Date.now();
+                    const delta = now - lastTimeRef.current;
+                    if (delta >= 1000) {
+                        fpsRef.current = frameCountRef.current;
+                        frameCountRef.current = 0;
+                        lastTimeRef.current = now;
+                    }
+                }
             }
 
-            const sent = videoStreamTask(capturedFrame);
+            animationFrameId = requestAnimationFrame(masterLoop);
+        };
 
-            if (!sent) {
-                // console.log("Failed to send frame via websocket.");
-                return;
-            }
+        animationFrameId = requestAnimationFrame(masterLoop);
 
-            // console.log("Sent frame via websocket:", capturedFrame.length);
-
-            const canvas = overlayCanvasRef.current;
-            if (!canvas) {
-                return;
-            }
-
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-                return;
-            }
-
-            const data = webSocketContext.getData();
-            if (!data || !("hands" in data)) {
-                return;
-            }
-
-            currentHandsDataRef.current = data["hands"] as Hand[];
-            // Clear the canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // Use the fixed reference size.
-            const imageSize = { width: 640, height: 360 };
-
-            // Draw each hand
-            processHands(currentHandsDataRef.current, imageSize, ctx);
-            // Draw any strokes accumulated (if in debug mode)
-            if (debug) {
-                drawStrokes(ctx);
-            }
-
-            calculateButtonColumnOffset();
-
-            frameCountRef.current = frameCountRef.current + 1;
-            const now = Date.now();
-            const delta = now - lastTimeRef.current;
-            if (delta >= 1000) {
-                fpsRef.current = frameCountRef.current;
-                frameCountRef.current = 0;
-                lastTimeRef.current = now;
-            }
-        }, 66);
-
-        return () => clearInterval(masterLoop);
+        return () => cancelAnimationFrame(animationFrameId);
     }, []);
 
     const resizeCanvases = useCallback(() => {

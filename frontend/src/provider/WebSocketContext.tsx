@@ -16,7 +16,7 @@ interface WebSocketProps {
 interface WebSocketContextType {
     getWebSocket: () => WebSocket | null;
     getStatus: () => SocketStatus;
-    sendFrame: (frame: string) => boolean;
+    sendFrame: (frame: ArrayBuffer) => boolean;
     getAcknowledged: () => boolean;
     getData: () => object | null;
 }
@@ -116,7 +116,7 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         };
     }, []);
 
-    const sendFrame = (frame: string): boolean => {
+    const sendFrame = (frame: ArrayBuffer): boolean => {
         if (!wsRef.current) {
             return false;
         }

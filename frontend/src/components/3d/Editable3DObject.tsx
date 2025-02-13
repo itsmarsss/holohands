@@ -340,7 +340,10 @@ function Editable3DObject({
         const width = mountRef.current.offsetWidth;
         const height = mountRef.current.offsetHeight;
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            powerPreference: "high-performance",
+        });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(width, height);
         rendererRef.current = renderer;

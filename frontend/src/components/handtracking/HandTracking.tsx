@@ -87,7 +87,7 @@ function HandTracking() {
                 (hand) => hand.handedness === "Left"
             ) &&
             leftCursorX &&
-            !leftCursor.isPinching
+            !leftCursor.isHolding
         ) {
             if (leftCursorX <= 200) {
                 leftPeek = leftPeek || true;

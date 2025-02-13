@@ -106,29 +106,39 @@ export const VideoStreamProvider = ({ children }: VideoStreamProps) => {
         }
     };
 
+    // Create a single offscreen canvas to reuse across frame captures.
+    const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
     const captureFrame = async (): Promise<ArrayBuffer | null> => {
         if (!videoRef.current) {
             console.error("Video reference is null.");
             return null;
         }
-        const canvas = document.createElement("canvas");
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
+        // Reuse the same canvas element every frame.
+        let canvas: HTMLCanvasElement;
+        if (!captureCanvasRef.current) {
+            captureCanvasRef.current = document.createElement("canvas");
+        }
+        canvas = captureCanvasRef.current;
+
+        // Set the canvas size to a fixed 640 by 360.
+        canvas.width = 640;
+        canvas.height = 360;
+
         const context = canvas.getContext("2d");
         if (!context) {
             console.error("Failed to get canvas context.");
             return null;
         }
-        // Mirror the video horizontally.
-        context.scale(-1, 1);
-        context.drawImage(
-            videoRef.current,
-            -canvas.width,
-            0,
-            canvas.width,
-            canvas.height
-        );
-        // Instead of a data URL, capture a JPEG blob and convert it to an ArrayBuffer.
+
+        // Set transform to mirror the video horizontally.
+        // This replaces context.scale(-1, 1) and positions the image correctly.
+        context.setTransform(-1, 0, 0, 1, canvas.width, 0);
+
+        // Draw the video frame into the canvas.
+        context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+
+        // Capture a JPEG blob and convert it to an ArrayBuffer.
         return new Promise((resolve) => {
             canvas.toBlob(
                 (blob) => {

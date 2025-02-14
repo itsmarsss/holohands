@@ -188,70 +188,80 @@ function HandTracking() {
         setupVideoStreamTask();
 
         let animationFrameId: number;
+        let lastFrameTime = Date.now(); // Track the last frame time
+
+        const loop = async (now: number) => {
+            const capturedFrame = await acknowledgeFrameTask();
+
+            if (!capturedFrame) {
+                return;
+            }
+
+            const sent = videoStreamTask(capturedFrame);
+
+            if (!sent) {
+                return;
+            }
+
+            const canvas = overlayCanvasRef.current;
+
+            if (!canvas) {
+                return;
+            }
+
+            const ctx = canvas.getContext("2d");
+
+            if (!ctx) {
+                return;
+            }
+
+            const data = webSocketContext.getData();
+
+            console.log("sent");
+            if (!data || !("hands" in data)) {
+                return;
+            }
+
+            currentHandsDataRef.current = data["hands"] as Hand[];
+
+            if (data && "hands" in data) {
+                currentHandsDataRef.current = data["hands"] as Hand[];
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                const imageSize = { width: 640, height: 360 };
+
+                processHands(currentHandsDataRef.current, imageSize, ctx);
+                if (debug) {
+                    drawStrokes(ctx);
+                }
+                calculateButtonColumnOffset();
+            }
+
+            frameCountRef.current += 1;
+            const delta = now - lastTimeRef.current;
+            if (delta >= 1000) {
+                fpsRef.current = frameCountRef.current;
+                frameCountRef.current = 0;
+                lastTimeRef.current = now;
+            }
+        };
 
         const masterLoop = async () => {
-            connectionStatusRef.current!.innerHTML =
-                webSocketContext.getConnectionStatus();
+            const now = Date.now();
+            const elapsed = now - lastFrameTime;
 
-            const loop = async () => {
-                const capturedFrame = await acknowledgeFrameTask();
+            // Only run the loop if 33ms have passed
+            if (elapsed >= 33) {
+                connectionStatusRef.current!.innerHTML =
+                    webSocketContext.getConnectionStatus();
 
-                if (!capturedFrame) {
-                    return;
-                }
+                await loop(now);
 
-                const sent = videoStreamTask(capturedFrame);
+                lastFrameTime = now; // Update the last frame time
+            }
 
-                if (!sent) {
-                    return;
-                }
-
-                const canvas = overlayCanvasRef.current;
-
-                if (!canvas) {
-                    return;
-                }
-
-                const ctx = canvas.getContext("2d");
-
-                if (!ctx) {
-                    return;
-                }
-
-                const data = webSocketContext.getData();
-
-                if (!data || !("hands" in data)) {
-                    return;
-                }
-
-                currentHandsDataRef.current = data["hands"] as Hand[];
-
-                if (data && "hands" in data) {
-                    currentHandsDataRef.current = data["hands"] as Hand[];
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    const imageSize = { width: 640, height: 360 };
-
-                    processHands(currentHandsDataRef.current, imageSize, ctx);
-                    if (debug) {
-                        drawStrokes(ctx);
-                    }
-                    calculateButtonColumnOffset();
-                }
-
-                frameCountRef.current += 1;
-                const now = Date.now();
-                const delta = now - lastTimeRef.current;
-                if (delta >= 1000) {
-                    fpsRef.current = frameCountRef.current;
-                    frameCountRef.current = 0;
-                    lastTimeRef.current = now;
-                }
-            };
-            loop();
-
-            // Only schedule the master loop once after initializing necessary tasks.
-            requestAnimationFrame(masterLoop);
+            // Schedule the next frame
+            animationFrameId = requestAnimationFrame(masterLoop);
         };
 
         animationFrameId = requestAnimationFrame(masterLoop);

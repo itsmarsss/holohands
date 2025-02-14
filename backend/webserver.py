@@ -22,7 +22,7 @@ mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=2,
-    min_detection_confidence=0.65,  # Lowered confidence threshold
+    min_detection_confidence=0.65,
     min_tracking_confidence=0.65
 )
 
@@ -39,7 +39,7 @@ def save_handsymbol():
     name, handedness, landmarks = data['name'], data['handedness'], data['landmarks']
     
     wrist = landmarks[0]
-    normalized_landmarks = np.array(landmarks) - wrist  # Vectorized normalization
+    normalized_landmarks = np.array(landmarks) - wrist
     
     middle_finger_mcp = normalized_landmarks[9]
     angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
@@ -64,11 +64,11 @@ def handle_websocket(ws):
         if message is None:
             break
         try:
-            # Check if the message is binary data (ArrayBuffer sent from the client)
+            start_time = datetime.datetime.now()
+
             if isinstance(message, bytes):
                 frame_bytes = message
             else:
-                # Fallback for legacy support: assume message is JSON with a Base64-encoded image.
                 payload = json.loads(message)
                 image_data = payload.get("image", "")
                 if image_data.startswith("data:image"):
@@ -76,18 +76,34 @@ def handle_websocket(ws):
                     frame_bytes = base64.b64decode(encoded)
                 else:
                     frame_bytes = None
-
+            
             if frame_bytes is not None:
                 np_arr = np.frombuffer(frame_bytes, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                frame = cv2.resize(frame, (640, 360))  # Downscale to 640x360
+                frame = cv2.resize(frame, (640, 360))
                 h, w = frame.shape[:2]
 
+                if (datetime.datetime.now() - start_time).total_seconds() * 1000 > 50:
+                    print("Skipping frame: Pre-processing too slow")
+                    ws.send(orjson.dumps({'status': 'dropped'}))
+                    continue
+
                 results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                hands_data, detected = [], {"Left": False, "Right": False}
+                if (datetime.datetime.now() - start_time).total_seconds() * 1000 > 50:
+                    print("Skipping frame: Hand processing too slow")
+                    ws.send(orjson.dumps({'status': 'dropped'}))
+                    continue
+
+                hands_data = []
+                detected = {"Left": False, "Right": False}
 
                 if results.multi_hand_landmarks:
                     for idx, landmarks in enumerate(results.multi_hand_landmarks):
+                        if (datetime.datetime.now() - start_time).total_seconds() * 1000 > 50:
+                            print("Skipping frame: Exceeded time limit in loop")
+                            ws.send(orjson.dumps({'status': 'dropped'}))
+                            break
+                        
                         handedness = results.multi_handedness[idx].classification[0].label
                         if detected[handedness]:
                             continue
@@ -95,7 +111,7 @@ def handle_websocket(ws):
                         
                         hand_landmarks = np.array([[lm.x * w, lm.y * h, lm.z] for lm in landmarks.landmark])
                         wrist = hand_landmarks[0]
-                        normalized_landmarks = hand_landmarks - wrist  # Vectorized normalization
+                        normalized_landmarks = hand_landmarks - wrist
                         
                         middle_finger_mcp = normalized_landmarks[9]
                         angle = np.arctan2(middle_finger_mcp[1], middle_finger_mcp[0])
@@ -105,32 +121,35 @@ def handle_websocket(ws):
                         ])
                         rotated_landmarks = np.hstack((normalized_landmarks[:, :2] @ rotation_matrix.T, normalized_landmarks[:, 2:]))
                         flattened_landmarks = rotated_landmarks.flatten()
-                        
+
+                        detected_symbols = []
                         if hand_symbols:
                             symbol_landmarks = np.array([
                                 symbol['landmarks']
                                 for symbol in hand_symbols if symbol['handedness'] == handedness
                             ])
-                            if len(symbol_landmarks) > 0:
+                            if symbol_landmarks.size > 0:
                                 similarities = (1 - cdist([flattened_landmarks], symbol_landmarks, metric='cosine')[0]).tolist()
                                 detected_symbols = sorted(
                                     zip([s['name'] for s in hand_symbols if s['handedness'] == handedness], similarities),
                                     key=lambda x: x[1],
                                     reverse=True
-                                )
-                            else:
-                                detected_symbols = []
-                        else:
-                            detected_symbols = []
+                                )[:3]
                         
                         hands_data.append({
                             'handedness': handedness,
                             'landmarks': hand_landmarks.round(3).tolist(),
                             'connections': [[conn[0], conn[1]] for conn in mp_hands.HAND_CONNECTIONS],
-                            'detected_symbols': detected_symbols[:3]  # Send only top 3 matches
+                            'detected_symbols': detected_symbols
                         })
+                
+                if (datetime.datetime.now() - start_time).total_seconds() * 1000 > 50:
+                    print("Skipping frame: Final check exceeded 50ms")
+                    ws.send(orjson.dumps({'status': 'dropped'}))
+                    continue
+
                 print(datetime.datetime.now().strftime("%H:%M:%S") + " returned")
-                ws.send(orjson.dumps({'hands': hands_data, 'image_size': {'width': w, 'height': h}}))
+                ws.send(orjson.dumps({'status': 'success', 'hands': hands_data, 'image_size': {'width': w, 'height': h}}))
         except Exception as e:
             print("WebSocket error:", str(e))
 

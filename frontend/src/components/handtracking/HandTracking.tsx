@@ -188,9 +188,8 @@ function HandTracking() {
         setupVideoStreamTask();
 
         let animationFrameId: number;
-        let lastFrameTime = Date.now(); // Track the last frame time
 
-        const loop = async (now: number) => {
+        const loop = async () => {
             const capturedFrame = await acknowledgeFrameTask();
 
             if (!capturedFrame) {
@@ -238,29 +237,17 @@ function HandTracking() {
             }
 
             frameCountRef.current += 1;
-            const delta = now - lastTimeRef.current;
+            const delta = Date.now() - lastTimeRef.current;
             if (delta >= 1000) {
                 fpsRef.current = frameCountRef.current;
                 frameCountRef.current = 0;
-                lastTimeRef.current = now;
+                lastTimeRef.current = Date.now();
             }
         };
 
         const masterLoop = async () => {
-            const now = Date.now();
-            const elapsed = now - lastFrameTime;
+            await loop();
 
-            // Only run the loop if 33ms have passed
-            if (elapsed >= 33) {
-                connectionStatusRef.current!.innerHTML =
-                    webSocketContext.getConnectionStatus();
-
-                await loop(now);
-
-                lastFrameTime = now; // Update the last frame time
-            }
-
-            // Schedule the next frame
             animationFrameId = requestAnimationFrame(masterLoop);
         };
 

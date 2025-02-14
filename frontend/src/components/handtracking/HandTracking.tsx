@@ -27,6 +27,8 @@ function HandTracking() {
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
 
+    const connectionStatusRef = useRef<HTMLDivElement | null>(null);
+
     // Add a debug toggle state.
     const { debug } = useDebug();
 
@@ -188,53 +190,68 @@ function HandTracking() {
         let animationFrameId: number;
 
         const masterLoop = async () => {
-            const capturedFrame = await acknowledgeFrameTask();
+            connectionStatusRef.current!.innerHTML =
+                webSocketContext.getConnectionStatus();
 
-            if (capturedFrame) {
+            const loop = async () => {
+                const capturedFrame = await acknowledgeFrameTask();
+
+                if (!capturedFrame) {
+                    return;
+                }
+
                 const sent = videoStreamTask(capturedFrame);
 
-                if (sent) {
-                    const canvas = overlayCanvasRef.current;
-                    if (canvas) {
-                        const ctx = canvas.getContext("2d");
-                        if (ctx) {
-                            const data = webSocketContext.getData();
-                            if (data && "hands" in data) {
-                                currentHandsDataRef.current = data[
-                                    "hands"
-                                ] as Hand[];
-                                ctx.clearRect(
-                                    0,
-                                    0,
-                                    canvas.width,
-                                    canvas.height
-                                );
-                                const imageSize = { width: 640, height: 360 };
-                                processHands(
-                                    currentHandsDataRef.current,
-                                    imageSize,
-                                    ctx
-                                );
-                                if (debug) {
-                                    drawStrokes(ctx);
-                                }
-                                calculateButtonColumnOffset();
-                            }
-                        }
-                    }
-
-                    frameCountRef.current += 1;
-                    const now = Date.now();
-                    const delta = now - lastTimeRef.current;
-                    if (delta >= 1000) {
-                        fpsRef.current = frameCountRef.current;
-                        frameCountRef.current = 0;
-                        lastTimeRef.current = now;
-                    }
+                if (!sent) {
+                    return;
                 }
-            }
 
-            animationFrameId = requestAnimationFrame(masterLoop);
+                const canvas = overlayCanvasRef.current;
+
+                if (!canvas) {
+                    return;
+                }
+
+                const ctx = canvas.getContext("2d");
+
+                if (!ctx) {
+                    return;
+                }
+
+                const data = webSocketContext.getData();
+
+                if (!data || !("hands" in data)) {
+                    return;
+                }
+
+                currentHandsDataRef.current = data["hands"] as Hand[];
+
+                if (data && "hands" in data) {
+                    currentHandsDataRef.current = data["hands"] as Hand[];
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    const imageSize = { width: 640, height: 360 };
+
+                    processHands(currentHandsDataRef.current, imageSize, ctx);
+                    if (debug) {
+                        drawStrokes(ctx);
+                    }
+                    calculateButtonColumnOffset();
+                }
+
+                frameCountRef.current += 1;
+                const now = Date.now();
+                const delta = now - lastTimeRef.current;
+                if (delta >= 1000) {
+                    fpsRef.current = frameCountRef.current;
+                    frameCountRef.current = 0;
+                    lastTimeRef.current = now;
+                }
+            };
+            loop();
+
+            // Only schedule the master loop once after initializing necessary tasks.
+            requestAnimationFrame(masterLoop);
         };
 
         animationFrameId = requestAnimationFrame(masterLoop);
@@ -280,8 +297,8 @@ function HandTracking() {
     return (
         <div ref={containerRef} className="handtracking-container">
             {/* Display the WebSocket connection status */}
-            <div className="connection-status">
-                {webSocketContext.getStatus()}
+            <div className="connection-status" ref={connectionStatusRef}>
+                Status
             </div>
             <Controls currentHandsDataRef={currentHandsDataRef} />
             <Editable3DObject

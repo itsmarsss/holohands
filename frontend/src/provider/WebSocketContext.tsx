@@ -3,8 +3,9 @@ import {
     useContext,
     useRef,
     ReactNode,
-    useMemo,
     useEffect,
+    useCallback,
+    useMemo,
 } from "react";
 import { SocketStatus } from "../objects/socketstatus";
 
@@ -15,7 +16,7 @@ interface WebSocketProps {
 
 interface WebSocketContextType {
     getWebSocket: () => WebSocket | null;
-    getStatus: () => SocketStatus;
+    getConnectionStatus: () => SocketStatus;
     sendFrame: (frame: ArrayBuffer) => boolean;
     getAcknowledged: () => boolean;
     getData: () => object | null;
@@ -38,7 +39,9 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         wsRef.current = ws;
 
         ws.onopen = () => {
+            console.warn("WebSocket connection opened.");
             connectionStatusRef.current = "Connected";
+
             if (retryTimeoutRef.current) {
                 clearTimeout(retryTimeoutRef.current);
                 retryTimeoutRef.current = null;
@@ -68,11 +71,9 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
 
             try {
                 const data = JSON.parse(messageText);
-                // console.log("Received data from websocket:", data);
                 if (data) {
                     dataRef.current = data;
                     acknowledgedRef.current = true;
-                    // console.log("Acknowledged frame.");
                 }
             } catch (error) {
                 console.error("Error parsing websocket message:", error);
@@ -89,6 +90,7 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
                 clearInterval(timeout);
                 return;
             }
+            connectionStatusRef.current = "Reconnecting...";
 
             console.log("Retrying WebSocket connection...");
             connectWebSocket();
@@ -119,7 +121,7 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     }, []);
 
     const sendFrame = (frame: ArrayBuffer): boolean => {
-        if (!wsRef.current) {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
             return false;
         }
 
@@ -129,16 +131,15 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
         return true;
     };
 
-    const websocketContextValue = useMemo(
-        () => ({
+    const websocketContextValue = useMemo(() => {
+        return {
             getWebSocket: () => wsRef.current,
-            getStatus: () => connectionStatusRef.current,
+            getConnectionStatus: () => connectionStatusRef.current,
             sendFrame,
             getAcknowledged: () => acknowledgedRef.current,
             getData: () => dataRef.current,
-        }),
-        []
-    );
+        };
+    }, [connectionStatusRef.current]);
 
     return (
         <WebSocketContext.Provider value={websocketContextValue}>

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { InteractionState } from "../../objects/InteractionState";
 import { useEffect, useRef, useMemo } from "react";
 import { Coords, DEFAULT_COORDS } from "../../objects/coords";
+import React from "react";
 
 interface Editable3DObjectProps {
     interactionStateRef: React.MutableRefObject<InteractionState>;
@@ -45,10 +46,14 @@ function Editable3DObject({
     );
 
     useEffect(() => {
-        setInterval(() => {
+        const interval = setInterval(() => {
             interactionStateRef.current = interactionState.current;
             // console.log("Interaction state:", interactionStateRef.current);
-        }, 66);
+        }, 33);
+
+        return () => {
+            clearInterval(interval);
+        };
     }, []);
 
     // Refs for computing gesture deltas.
@@ -618,4 +623,4 @@ function Editable3DObject({
     return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
 }
 
-export default Editable3DObject;
+export default React.memo(Editable3DObject);

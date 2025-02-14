@@ -30,20 +30,15 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     const acknowledgedRef = useRef<boolean>(false);
     const dataRef = useRef<object | null>(null);
     const fallbackCounterRef = useRef<number>(0);
+    const RECONNECT_INTERVAL = 3000;
 
-    const connect = () => {
+    const connectWebSocket = () => {
         connectionStatusRef.current = "Connecting...";
         const ws = new WebSocket(url);
         wsRef.current = ws;
 
-        initWebSocket(ws);
-    };
-
-    const initWebSocket = (ws: WebSocket) => {
-        console.log("Initializing WebSocket");
         ws.onopen = () => {
             connectionStatusRef.current = "Connected";
-
             if (retryTimeoutRef.current) {
                 clearTimeout(retryTimeoutRef.current);
                 retryTimeoutRef.current = null;
@@ -86,17 +81,24 @@ export const WebSocketProvider = ({ url, children }: WebSocketProps) => {
     };
 
     const retryConnection = () => {
-        if (retryTimeoutRef.current) return; // Prevent multiple timeouts
-        const timeout = setTimeout(() => {
+        if (retryTimeoutRef.current) return;
+
+        const timeout = setInterval(() => {
+            if (connectionStatusRef.current === "Connected") {
+                retryTimeoutRef.current = null;
+                clearInterval(timeout);
+                return;
+            }
+
             console.log("Retrying WebSocket connection...");
-            connect();
-        }, 1000); // Adjust the timeout as needed
+            connectWebSocket();
+        }, RECONNECT_INTERVAL);
         retryTimeoutRef.current = timeout;
     };
 
     useEffect(() => {
         if (!wsRef.current) {
-            connect();
+            connectWebSocket();
         }
 
         const fallbackTimeout = setInterval(() => {

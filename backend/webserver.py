@@ -80,7 +80,7 @@ def handle_websocket(ws):
             if frame_bytes is not None:
                 np_arr = np.frombuffer(frame_bytes, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                frame = cv2.resize(frame, (640, 480))  # Downscale to 640x480
+                frame = cv2.resize(frame, (640, 360))  # Downscale to 640x360
                 h, w = frame.shape[:2]
 
                 results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))

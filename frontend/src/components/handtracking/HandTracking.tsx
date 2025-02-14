@@ -17,6 +17,7 @@ import {
     InteractionStateHand,
 } from "../../objects/InteractionState";
 import Cursors from "../cursor/Cursors";
+import React from "react";
 
 function HandTracking() {
     const fpsRef = useRef<number>(0);
@@ -292,8 +293,8 @@ function HandTracking() {
             />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             <Cursors
-                currentHandsDataRef={currentHandsDataRef}
-                interactionStateRef={interactionStateRef}
+                currentHandsData={currentHandsDataRef}
+                interactionState={interactionStateRef}
                 overlayCanvasRef={overlayCanvasRef}
             />
             <ButtonColumn side="left" count={5} peek={leftButtonColumnPeek} />
@@ -307,4 +308,4 @@ function HandTracking() {
     );
 }
 
-export default HandTracking;
+export default React.memo(HandTracking);

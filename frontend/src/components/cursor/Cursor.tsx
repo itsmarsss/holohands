@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
-import * as THREE from "three";
+import { useEffect, useRef, useState } from "react";
 import "./Cursor.css";
 import { InteractionStateHand } from "../../objects/InteractionState";
+import { gsap } from "gsap";
+import React from "react";
 
 interface CursorProps {
     name: string;
-    hand: InteractionStateHand;
+    handRef: React.MutableRefObject<InteractionStateHand | null>;
     overlayCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+    speed: number; // New prop for customizable speed
 }
 
-function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
+function Cursor({ name, handRef, overlayCanvasRef, speed }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
 
     // These refs track hover times and timers for simulated button hover.
@@ -24,29 +26,47 @@ function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
 
     // NEW: A ref to store the target cursor position for smoothing.
     const targetCursorRef = useRef({
-        x: hand.cursor?.coords.x,
-        y: hand.cursor?.coords.y,
+        x: handRef.current?.cursor?.coords.x,
+        y: handRef.current?.cursor?.coords.y,
     });
 
-    // Whenever the coords prop changes, update the target.
+    const [status, setStatus] = useState<string>(
+        handRef.current?.isPinching
+            ? "Pinching"
+            : handRef.current?.isHolding
+            ? "Holding"
+            : "Idle"
+    );
+
+    // Instead of local state updates, use GSAP ticker to always update the target coordinates from handRef.
     useEffect(() => {
-        targetCursorRef.current.x = hand.cursor?.coords.x || 0;
-        targetCursorRef.current.y = hand.cursor?.coords.y || 0;
-    }, [hand]);
+        const updateTarget = () => {
+            if (!handRef.current) return;
+
+            targetCursorRef.current.x = handRef.current.cursor?.coords.x || 0;
+            targetCursorRef.current.y = handRef.current.cursor?.coords.y || 0;
+            setStatus(
+                handRef.current.isPinching
+                    ? "Pinching"
+                    : handRef.current.isHolding
+                    ? "Holding"
+                    : "Idle"
+            );
+        };
+        gsap.ticker.add(updateTarget);
+        return () => {
+            gsap.ticker.remove(updateTarget);
+        };
+    }, [handRef]);
 
     useEffect(() => {
-        let animationFrameId: number;
-
         const updateCursor = () => {
-            if (!cursorRef.current) {
-                animationFrameId = requestAnimationFrame(updateCursor);
-                return;
-            }
+            if (!cursorRef.current) return;
 
             const cursor = cursorRef.current;
             // Use the target values from the ref.
-            const targetX = targetCursorRef.current.x;
-            const targetY = targetCursorRef.current.y;
+            const targetX = targetCursorRef.current.x || 0;
+            const targetY = targetCursorRef.current.y || 0;
 
             // Get the overlay canvas offset.
             const { left: xOffset, top: yOffset } =
@@ -55,29 +75,17 @@ function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
                     top: 0,
                 };
 
-            // Read the current cursor positions (if not set, default to target).
-            const previousX = parseFloat(cursor.style.left) || targetX;
-            const previousY = parseFloat(cursor.style.top) || targetY;
-
-            // Smoothly interpolate toward the target using THREE.MathUtils.lerp.
-            const smoothingFactor = 0.2; // Adjust for the desired smoothness
-            const newX = THREE.MathUtils.lerp(
-                previousX || 0,
-                targetX || 0,
-                smoothingFactor
-            );
-            const newY = THREE.MathUtils.lerp(
-                previousY || 0,
-                targetY || 0,
-                smoothingFactor
-            );
-
-            cursor.style.left = `${newX}px`;
-            cursor.style.top = `${newY + yOffset}px`;
+            // Use GSAP to animate the cursor's position.
+            gsap.to(cursorRef.current, {
+                left: `${targetX}px`,
+                top: `${targetY + yOffset}px`,
+                duration: speed, // Use the customizable speed
+                ease: "power2.out", // Easing function for smoothness
+            });
 
             // Simulate button hover using the absolute position of the cursor.
-            const absoluteCursorX = newX + xOffset;
-            const absoluteCursorY = newY + yOffset;
+            const absoluteCursorX = targetX + xOffset;
+            const absoluteCursorY = targetY + yOffset;
             const buttons = document.querySelectorAll(".button-column .button");
             buttons.forEach((button) => {
                 const rect = button.getBoundingClientRect();
@@ -141,13 +149,11 @@ function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
                 // Only show the progress indicator if any button is being hovered.
                 progressRef.current.style.opacity = maxProgress > 0 ? "1" : "0";
             }
-
-            animationFrameId = requestAnimationFrame(updateCursor);
         };
 
-        updateCursor(); // Start the animation loop.
+        gsap.ticker.add(updateCursor);
         return () => {
-            cancelAnimationFrame(animationFrameId);
+            gsap.ticker.remove(updateCursor);
         };
     }, [overlayCanvasRef]);
 
@@ -178,13 +184,7 @@ function Cursor({ name, hand, overlayCanvasRef }: CursorProps) {
                 />
             </svg>
             <div className="cursor-status">
-                <p>
-                    {hand.isPinching
-                        ? "Pinching"
-                        : hand.isHolding
-                        ? "Holding"
-                        : "Idle"}
-                </p>
+                <p>{status}</p>
             </div>
         </div>
     );

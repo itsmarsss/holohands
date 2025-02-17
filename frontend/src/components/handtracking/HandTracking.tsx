@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Controls from "../controls/Controls";
 import "./HandTracking.css";
-import Editable3DObject from "../3d/Editable3DObject";
+import Editable3DRenderer from "../3d/Editable3DRenderer";
 import { Hand } from "../../objects/hand";
 import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
@@ -190,6 +190,11 @@ function HandTracking() {
         let animationFrameId: number;
 
         const loop = async () => {
+            if (connectionStatusRef.current) {
+                connectionStatusRef.current.innerHTML =
+                    webSocketContext.getConnectionStatus();
+            }
+
             const capturedFrame = await acknowledgeFrameTask();
 
             if (!capturedFrame) {
@@ -216,7 +221,7 @@ function HandTracking() {
 
             const data = webSocketContext.getData();
 
-            console.log("sent");
+            // console.log("sent");
             if (!data || !("hands" in data)) {
                 return;
             }
@@ -298,13 +303,7 @@ function HandTracking() {
                 Status
             </div>
             <Controls currentHandsDataRef={currentHandsDataRef} />
-            <Editable3DObject
-                interactionStateRef={interactionStateRef}
-                //rotation={objectRotation}
-                //zoom={objectZoom}
-                //onRotationChange={setObjectRotation}
-                //onZoomChange={setObjectZoom}
-            />
+            <Editable3DRenderer interactionStateRef={interactionStateRef} />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             <Cursors
                 currentHandsData={currentHandsDataRef}

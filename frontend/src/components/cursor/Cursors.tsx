@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Hand } from "../../objects/hand";
 import {
-    DEFAULT_INTERACTION_STATE_HAND,
     InteractionState,
     InteractionStateHand,
 } from "../../objects/InteractionState";

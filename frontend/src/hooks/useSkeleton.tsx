@@ -299,6 +299,7 @@ function useSkeleton({
         },
         []
     );
+
     const drawText = useCallback(
         (x: number, y: number, text: string, ctx: CanvasRenderingContext2D) => {
             ctx.fillStyle = "#FFFFFF";
@@ -527,6 +528,15 @@ function useSkeleton({
             imageSize: ImageSize,
             ctx: CanvasRenderingContext2D
         ) => {
+            drawText(
+                10,
+                20,
+                `FPS: ${fpsRef.current}${
+                    fpsRef.current < 20 ? " (Buffering...)" : ""
+                }`,
+                ctx
+            );
+
             interactionStateRef.current.Left = null;
             interactionStateRef.current.Right = null;
 
@@ -558,11 +568,6 @@ function useSkeleton({
             interactionStateRef.current.angleBetween = angleBetween;
 
             updateInteractionState(interactionStateRef.current);
-
-            // Use latest debug value from debugRef.
-            if (debugRef.current) {
-                debugText(10, 10, `FPS: ${fpsRef.current}`, ctx);
-            }
         },
         [overlayCanvasRef, updateInteractionState, drawHand, fpsRef]
     );

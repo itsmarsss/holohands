@@ -63,7 +63,6 @@ function Cursor({ name, handRef, overlayCanvasRef, speed }: CursorProps) {
         const updateCursor = () => {
             if (!cursorRef.current) return;
 
-            const cursor = cursorRef.current;
             // Use the target values from the ref.
             const targetX = targetCursorRef.current.x || 0;
             const targetY = targetCursorRef.current.y || 0;

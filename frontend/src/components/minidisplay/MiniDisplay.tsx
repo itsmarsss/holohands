@@ -1,13 +1,16 @@
 import "./MiniDisplay.css";
-import { useEffect } from "react";
+import { useEffect, useReducer } from "react";
 import { useVideoStream } from "../../provider/VideoStreamContext";
 
 function MiniDisplay() {
     const videoStreamContext = useVideoStream();
-    const videoRef = videoStreamContext?.videoRef;
-    const stream = videoStreamContext?.getStream();
+    const videoRef = videoStreamContext.videoRef;
+
+    const [dep, forceUpdate] = useReducer((x) => x + 1, 0);
 
     useEffect(() => {
+        const stream = videoStreamContext.getStream();
+
         if (videoRef?.current && stream) {
             // Set the stream as the video source.
             videoRef.current.srcObject = stream;
@@ -48,8 +51,12 @@ function MiniDisplay() {
                     videoRef.current.onloadedmetadata = null;
                 }
             };
+        } else {
+            setTimeout(() => {
+                forceUpdate();
+            }, 100);
         }
-    }, [stream, videoRef]);
+    }, [dep]);
 
     return (
         <div className="minidisplay-container">
@@ -59,6 +66,7 @@ function MiniDisplay() {
                 autoPlay
                 playsInline
                 muted
+                preload="auto"
             />
         </div>
     );

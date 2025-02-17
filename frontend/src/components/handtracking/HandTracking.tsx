@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Controls from "../controls/Controls";
 import "./HandTracking.css";
-import Editable3DRenderer from "../3d/Editable3DRenderer";
 import { Hand } from "../../objects/hand";
 import useSkeleton from "../../hooks/useSkeleton";
 import CameraSelect from "../cameraselect/CameraSelect";
+import ThreeDRenderer from "../3d/ThreeDRenderer";
 import { useDebug } from "../../provider/DebugContext";
 import { toast } from "react-toastify";
 import { Device } from "../../objects/device";
@@ -13,7 +13,6 @@ import { useVideoStream } from "../../provider/VideoStreamContext";
 import {
     InteractionState,
     DEFAULT_INTERACTION_STATE,
-    InteractionStateHand,
 } from "../../objects/InteractionState";
 import Cursors from "../cursor/Cursors";
 import React from "react";
@@ -233,7 +232,7 @@ function HandTracking() {
                 Status
             </div>
             <Controls currentHandsDataRef={currentHandsDataRef} />
-            <Editable3DRenderer interactionStateRef={interactionStateRef} />
+            <ThreeDRenderer interactionStateRef={interactionStateRef} />
             <canvas className="overlay-canvas" ref={overlayCanvasRef} />
             <Cursors
                 currentHandsData={currentHandsDataRef}

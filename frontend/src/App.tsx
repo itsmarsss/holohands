@@ -4,7 +4,7 @@ import SideBar from "./components/sidebar/SideBar";
 import { WebSocketProvider } from "./provider/WebSocketContext";
 import { DebugContextProvider } from "./provider/DebugContext";
 import { VideoStreamProvider } from "./provider/VideoStreamContext";
-import { Editable3DProvider } from "./provider/Editable3DContext";
+import { ThreeDProvider } from "./provider/ThreeDContext";
 
 function App() {
     return (
@@ -14,13 +14,13 @@ function App() {
                     url={`ws://${import.meta.env.VITE_BASE_URL}/ws`}
                 >
                     <VideoStreamProvider>
-                        <Editable3DProvider>
+                        <ThreeDProvider>
                             {/* Left side: SideBar */}
                             <SideBar />
 
                             {/* Right side: HandTracking */}
                             <HandTracking />
-                        </Editable3DProvider>
+                        </ThreeDProvider>
                     </VideoStreamProvider>
                 </WebSocketProvider>
             </DebugContextProvider>

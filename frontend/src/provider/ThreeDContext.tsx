@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import * as THREE from "three";
 
-interface Editable3DContextType {
+interface ThreeDContextType {
     selectObject: (objectName: string) => void;
     setObjectVisibility: (objectName: string, visible: boolean) => void;
     registerObject: (
@@ -37,9 +37,9 @@ interface Editable3DContextType {
     updateCubeGeometry: (faceMesh: THREE.Mesh) => void;
 }
 
-const Editable3DContext = createContext<Editable3DContextType | null>(null);
+const ThreeDContext = createContext<ThreeDContextType | null>(null);
 
-export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
+export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
     children,
 }) => {
     const objectsRef = useRef<{
@@ -92,7 +92,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         const gridHelper = new THREE.GridHelper(1000, 1000);
         mainGroupRef.current.add(gridHelper);
 
-        createCube("cube1", new THREE.Vector3(0, 0, 0), 0x00ff00);
+        createCube("cube-1", new THREE.Vector3(0, 0, 0), 0x00ff00);
 
         sceneRef.current.add(mainGroupRef.current);
     };
@@ -328,7 +328,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log(objectsRef.current);
     }, [objectsRef.current]);
 
-    const editable3DContextValue: Editable3DContextType = useMemo(() => {
+    const threeDContextValue: ThreeDContextType = useMemo(() => {
         return {
             selectObject,
             setObjectVisibility,
@@ -352,18 +352,16 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
     }, []);
 
     return (
-        <Editable3DContext.Provider value={editable3DContextValue}>
+        <ThreeDContext.Provider value={threeDContextValue}>
             {children}
-        </Editable3DContext.Provider>
+        </ThreeDContext.Provider>
     );
 };
 
-export const useEditable3D = () => {
-    const context = useContext(Editable3DContext);
+export const useThreeD = () => {
+    const context = useContext(ThreeDContext);
     if (!context) {
-        throw new Error(
-            "useEditable3D must be used within an Editable3DProvider"
-        );
+        throw new Error("useThreeD must be used within an ThreeDProvider");
     }
     return context;
 };

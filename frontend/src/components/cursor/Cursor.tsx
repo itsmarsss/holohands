@@ -3,7 +3,7 @@ import "./Cursor.css";
 import { InteractionStateHand } from "../../objects/InteractionState";
 import { gsap } from "gsap";
 import React from "react";
-import { useEditable3D } from "../../provider/Editable3DContext";
+import { useThreeD } from "../../provider/ThreeDContext";
 import * as THREE from "three";
 
 interface CursorProps {
@@ -15,10 +15,6 @@ interface CursorProps {
 function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
     const statusRef = useRef<HTMLParagraphElement>(null);
-
-    // These refs track hover times and timers for simulated button hover.
-    const hoverStartTimes = useRef(new WeakMap<Element, number>());
-    const hoverTimers = useRef(new WeakMap<Element, number>());
 
     // Ref for the circular progress SVG circle.
     const progressRef = useRef<SVGCircleElement>(null);
@@ -49,7 +45,7 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     // NEW: Ref to track when the menu was activated for timer animation on the circle
     const menuStartTimeRef = useRef<number | null>(null);
 
-    const { resetCamera, createCube } = useEditable3D();
+    const { resetCamera, createCube } = useThreeD();
 
     const [_, forceUpdate] = useReducer((x) => x + 1, 0);
 

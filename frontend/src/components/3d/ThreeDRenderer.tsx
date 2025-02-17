@@ -3,7 +3,7 @@ import { InteractionState } from "../../objects/InteractionState";
 import { useEffect, useRef } from "react";
 import { Coords, DEFAULT_COORDS } from "../../objects/coords";
 import React from "react";
-import { useEditable3D } from "../../provider/Editable3DContext";
+import { useThreeD } from "../../provider/ThreeDContext";
 
 interface Editable3DObjectProps {
     interactionStateRef: React.MutableRefObject<InteractionState>;
@@ -70,7 +70,7 @@ function Editable3DObject({
         rendererRef,
         resetCameraRef,
         objectsRef,
-    } = useEditable3D();
+    } = useThreeD();
 
     // ────────────────────────────────────────────────────────────────
     // Set up scene, camera, renderer and add our editable cubes.
@@ -219,7 +219,7 @@ function Editable3DObject({
             }
 
             // ── Update marker highlighting via raycasting ──
-            const TOLERANCE = 0.05 * (zoomRef.current || 1);
+            const TOLERANCE = 0.025 * (zoomRef.current || 1);
             let closestMarker: THREE.Mesh | null = null;
             let minDistanceMarker = Infinity;
 
@@ -422,12 +422,16 @@ function Editable3DObject({
         }
 
         const rect = mountRef.current.getBoundingClientRect();
-
+        const normalizedX =
+            source === "mouse"
+                ? ((x - rect.left) / rect.width) * 2 - 1
+                : (x / rect.width) * 2 - 1;
+        const normalizedY =
+            source === "mouse"
+                ? -((y - rect.top) / rect.height) * 2 + 1
+                : -(y / rect.height) * 2 + 1;
         const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2(
-            (x / rect.width) * 2 - 1,
-            -(y / rect.height) * 2 + 1
-        );
+        const mouse = new THREE.Vector2(normalizedX, normalizedY);
         raycaster.setFromCamera(mouse, cameraRef.current!);
         // If a marker is hovered, begin dragging it.
         if (hoveredMarkerRef.current) {
@@ -569,16 +573,26 @@ function Editable3DObject({
         }
 
         const rect = mountRef.current.getBoundingClientRect();
-        pointerRef.current.x = (x / rect.width) * 2 - 1;
-        pointerRef.current.y = -(y / rect.height) * 2 + 1;
+        if (source === "mouse") {
+            pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
+            pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
+        } else {
+            pointerRef.current.x = x;
+            pointerRef.current.y = y;
+        }
 
         // ── DRAGGING A CUBE ──
         if (activeObjectRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2(
-                (x / rect.width) * 2 - 1,
-                -(y / rect.height) * 2 + 1
-            );
+            const normalizedX =
+                source === "mouse"
+                    ? ((x - rect.left) / rect.width) * 2 - 1
+                    : (x / rect.width) * 2 - 1;
+            const normalizedY =
+                source === "mouse"
+                    ? -((y - rect.top) / rect.height) * 2 + 1
+                    : -(y / rect.height) * 2 + 1;
+            const mouse = new THREE.Vector2(normalizedX, normalizedY);
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
 
@@ -651,10 +665,15 @@ function Editable3DObject({
         // ── DRAGGING A MARKER (VERTEX) ──
         if (activeMarkerRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2(
-                (x / rect.width) * 2 - 1,
-                -(y / rect.height) * 2 + 1
-            );
+            const normalizedX =
+                source === "mouse"
+                    ? ((x - rect.left) / rect.width) * 2 - 1
+                    : (x / rect.width) * 2 - 1;
+            const normalizedY =
+                source === "mouse"
+                    ? -((y - rect.top) / rect.height) * 2 + 1
+                    : -(y / rect.height) * 2 + 1;
+            const mouse = new THREE.Vector2(normalizedX, normalizedY);
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
 

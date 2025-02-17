@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Stroke } from "../objects/stroke";
 import { Hand, HAND_COLORS } from "../objects/hand";
 import {
@@ -61,11 +61,6 @@ function useSkeleton({
 
     // Global strokes array, storing all strokes from either hand in order.
     const strokes = useRef<Stroke[]>([]);
-    // Keep track of the current (active) stroke for each hand.
-    const currentStroke = useRef<Record<"Left" | "Right", Stroke | null>>({
-        Left: null,
-        Right: null,
-    });
 
     const distanceHistoryIndexThumb = useRef<
         Record<"Left" | "Right", number[]>

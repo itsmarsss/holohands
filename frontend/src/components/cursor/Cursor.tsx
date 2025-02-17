@@ -8,10 +8,9 @@ interface CursorProps {
     name: string;
     handRef: React.MutableRefObject<InteractionStateHand | null>;
     overlayCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
-    speed: number; // New prop for customizable speed
 }
 
-function Cursor({ name, handRef, overlayCanvasRef, speed }: CursorProps) {
+function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     const cursorRef = useRef<HTMLDivElement>(null);
 
     // These refs track hover times and timers for simulated button hover.

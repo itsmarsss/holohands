@@ -72,7 +72,6 @@ function Cursors({
                     name="leftCursor"
                     handRef={leftCursorRef}
                     overlayCanvasRef={overlayCanvasRef}
-                    speed={0.1}
                 />
             )}
             {hasRightHand && (
@@ -80,7 +79,6 @@ function Cursors({
                     name="rightCursor"
                     handRef={rightCursorRef}
                     overlayCanvasRef={overlayCanvasRef}
-                    speed={0.1}
                 />
             )}
         </>

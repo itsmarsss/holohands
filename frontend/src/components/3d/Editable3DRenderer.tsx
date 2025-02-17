@@ -36,6 +36,9 @@ function Editable3DObject({
     const dragOffsetRef = useRef(new THREE.Vector3());
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
+    // NEW: Ref to store the target position for the currently dragged marker.
+    const targetMarkerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
     // New ref for dragging the entire cube
     const activeCubeRef = useRef<THREE.Object3D<THREE.Object3DEventMap> | null>(
         null
@@ -48,8 +51,6 @@ function Editable3DObject({
 
     // Get setScene from our context
     const {
-        registerObject,
-        unregisterObject,
         setupScene,
         createCube,
         renderScene,
@@ -168,6 +169,27 @@ function Editable3DObject({
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
             }
 
+            // Smoothly update the cube’s position when dragging.
+            if (activeCubeRef.current) {
+                activeCubeRef.current.position.lerp(
+                    targetCubePositionRef.current,
+                    0.1
+                );
+            }
+
+            // NEW: Smoothly update the marker’s (vertex) position when dragging.
+            if (activeMarkerRef.current) {
+                activeMarkerRef.current.position.lerp(
+                    targetMarkerPositionRef.current,
+                    0.1
+                );
+                // Optionally update cube geometry if this marker controls it.
+                const cubeGroup = activeMarkerRef.current.parent?.parent;
+                if (cubeGroup && cubeGroup.userData.updateGeometry) {
+                    cubeGroup.userData.updateGeometry();
+                }
+            }
+
             // Update pointer from hand tracking if available.
             const handCursor = rightHand?.cursor || leftHand?.cursor;
             if (handCursor && mountRef.current) {
@@ -282,14 +304,6 @@ function Editable3DObject({
                 cursorUp();
                 lastMousePosition.current["leftHand"] = DEFAULT_COORDS;
             }
-
-            // (Optional) If dragging an object (e.g. a cube), update its position smoothly.
-            if (activeCubeRef.current) {
-                activeCubeRef.current.position.lerp(
-                    targetCubePositionRef.current,
-                    0.1
-                );
-            }
         };
         animate();
 
@@ -321,13 +335,6 @@ function Editable3DObject({
         };
     }, []);
 
-    // Refs for computing gesture deltas.
-    const pinchPrevPosRef = useRef<
-        Record<"Left" | "Right", { x: number; y: number } | null>
-    >({
-        Left: null,
-        Right: null,
-    });
     // This ref holds the previous distance between the two hand cursors.
     const previousPinchDistanceRef = useRef<number | null>(null);
 
@@ -363,6 +370,15 @@ function Editable3DObject({
             activeMarkerRef.current = hoveredMarkerRef.current;
             const markerWorldPos = new THREE.Vector3();
             activeMarkerRef.current.getWorldPosition(markerWorldPos);
+
+            if (activeMarkerRef.current.parent) {
+                const localPos = markerWorldPos.clone();
+                activeMarkerRef.current.parent.worldToLocal(localPos);
+                targetMarkerPositionRef.current.copy(localPos);
+            } else {
+                targetMarkerPositionRef.current.copy(markerWorldPos);
+            }
+
             // Create a plane perpendicular to the camera's direction through the marker.
             const plane = new THREE.Plane();
             const camDir = new THREE.Vector3();
@@ -493,7 +509,7 @@ function Editable3DObject({
         pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
         pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
 
-        // If dragging a cube (and not a marker), update the cube's position.
+        // If dragging a cube (and not a marker), update its position.
         if (activeCubeRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
@@ -514,9 +530,10 @@ function Editable3DObject({
                     const localPos = parent.worldToLocal(
                         intersectionPoint.clone()
                     );
-                    activeCubeRef.current.position.copy(localPos);
+                    // Instead of directly setting the cube’s position, update its target.
+                    targetCubePositionRef.current.copy(localPos);
                 } else {
-                    activeCubeRef.current.position.copy(intersectionPoint);
+                    targetCubePositionRef.current.copy(intersectionPoint);
                 }
             }
             return;
@@ -543,14 +560,10 @@ function Editable3DObject({
                     const localPos = parent.worldToLocal(
                         intersectionPoint.clone()
                     );
-                    activeMarkerRef.current.position.copy(localPos);
-                    // Update cube geometry.
-                    const cubeGroup = parent.parent;
-                    if (cubeGroup && cubeGroup.userData.updateGeometry) {
-                        cubeGroup.userData.updateGeometry();
-                    }
+                    // Instead of copying the position directly, update the target.
+                    targetMarkerPositionRef.current.copy(localPos);
                 } else {
-                    activeMarkerRef.current.position.copy(intersectionPoint);
+                    targetMarkerPositionRef.current.copy(intersectionPoint);
                 }
             }
             return;

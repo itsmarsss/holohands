@@ -30,6 +30,8 @@ function Editable3DObject({
     const pointerRef = useRef<THREE.Vector2>(new THREE.Vector2(0, 0));
     // Track the currently hovered marker.
     const hoveredMarkerRef = useRef<THREE.Mesh | null>(null);
+    // NEW: Ref to store the currently hovered object (e.g. cube face or any interactive object)
+    const hoveredObjectRef = useRef<THREE.Object3D | null>(null);
 
     // Refs for dragging a marker.
     const activeMarkerRef = useRef<THREE.Mesh | null>(null);
@@ -40,9 +42,8 @@ function Editable3DObject({
     const targetMarkerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
     // New ref for dragging the entire cube.
-    const activeCubeRef = useRef<THREE.Object3D<THREE.Object3DEventMap> | null>(
-        null
-    );
+    const activeObjectRef =
+        useRef<THREE.Object3D<THREE.Object3DEventMap> | null>(null);
 
     // Keep an up-to-date copy of the interaction state for hand–based gestures.
     const interactionStateRef = useRef<InteractionState | null>(
@@ -68,6 +69,7 @@ function Editable3DObject({
         zoomRef,
         rendererRef,
         resetCameraRef,
+        objectsRef,
     } = useEditable3D();
 
     // ────────────────────────────────────────────────────────────────
@@ -188,8 +190,8 @@ function Editable3DObject({
             }
 
             // Smoothly update the cube's position when dragging.
-            if (activeCubeRef.current) {
-                activeCubeRef.current.position.lerp(
+            if (activeObjectRef.current) {
+                activeObjectRef.current.position.lerp(
                     targetCubePositionRef.current,
                     0.1
                 );
@@ -219,48 +221,87 @@ function Editable3DObject({
             }
 
             // ── Update marker highlighting via raycasting ──
-            const hoveredMarkers = new Set<THREE.Object3D>();
-            const pointers: THREE.Vector2[] = [];
-            pointers.push(pointerRef.current);
-            pointers.forEach((pointer) => {
-                raycaster.setFromCamera(pointer, cameraRef.current!);
-                const intersects = raycaster.intersectObjects(
-                    cornerMarkersRef.current,
-                    false
-                );
-                intersects.forEach((intersect) =>
-                    hoveredMarkers.add(intersect.object)
-                );
-            });
             const TOLERANCE = 0.05 * (zoomRef.current || 1);
             let closestMarker: THREE.Mesh | null = null;
-            let minDistance = Infinity;
-            pointers.forEach((pointer) => {
-                cornerMarkersRef.current.forEach((marker) => {
-                    const markerWorldPos = new THREE.Vector3();
-                    marker.getWorldPosition(markerWorldPos);
-                    markerWorldPos.project(cameraRef.current!);
-                    const markerPos2D = new THREE.Vector2(
-                        markerWorldPos.x,
-                        markerWorldPos.y
-                    );
-                    const distance = pointer.distanceTo(markerPos2D);
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        closestMarker = marker;
-                    }
-                });
+            let minDistanceMarker = Infinity;
+
+            cornerMarkersRef.current.forEach((marker) => {
+                const markerWorldPos = new THREE.Vector3();
+                marker.getWorldPosition(markerWorldPos);
+                markerWorldPos.project(cameraRef.current!);
+                const markerPos2D = new THREE.Vector2(
+                    markerWorldPos.x,
+                    markerWorldPos.y
+                );
+                const distance = pointerRef.current.distanceTo(markerPos2D);
+                if (distance < minDistanceMarker) {
+                    minDistanceMarker = distance;
+                    closestMarker = marker;
+                }
             });
+
             cornerMarkersRef.current.forEach((marker) => {
                 const material = marker.material as THREE.MeshBasicMaterial;
-                if (marker === closestMarker && minDistance < TOLERANCE) {
+                if (marker === closestMarker && minDistanceMarker < TOLERANCE) {
                     material.color.set(0xffff00);
                 } else {
                     material.color.set(0x0000ff);
                 }
             });
             hoveredMarkerRef.current =
-                minDistance < TOLERANCE ? closestMarker : null;
+                minDistanceMarker < TOLERANCE ? closestMarker : null;
+
+            const objectRaycaster = new THREE.Raycaster();
+            objectRaycaster.setFromCamera(
+                pointerRef.current,
+                cameraRef.current!
+            );
+            let intersectedObject: THREE.Object3D | null = null;
+            let closestIntersectionDistance = Infinity;
+
+            Object.values(objectsRef.current).forEach((object) => {
+                object.children.forEach((child) => {
+                    if (
+                        child.name === "faceMesh" &&
+                        "material" in child &&
+                        child instanceof THREE.Mesh &&
+                        child.material instanceof THREE.MeshBasicMaterial
+                    ) {
+                        const intersections =
+                            objectRaycaster.intersectObject(child);
+                        if (
+                            intersections.length > 0 &&
+                            intersections[0].distance <
+                                closestIntersectionDistance
+                        ) {
+                            closestIntersectionDistance =
+                                intersections[0].distance;
+                            intersectedObject = object;
+                        }
+                    }
+                });
+            });
+
+            Object.values(objectsRef.current).forEach((object) => {
+                object.children.forEach((child) => {
+                    if (
+                        child.name === "faceMesh" &&
+                        "material" in child &&
+                        child instanceof THREE.Mesh &&
+                        child.material instanceof THREE.MeshBasicMaterial
+                    ) {
+                        const material =
+                            child.material as THREE.MeshBasicMaterial;
+                        if (object === intersectedObject) {
+                            material.color.set(0xffff00);
+                        } else {
+                            material.color.set(0x00ff00);
+                        }
+                    }
+                });
+            });
+
+            hoveredObjectRef.current = intersectedObject;
 
             // Handle right-hand interactions.
             if (rightHand?.isHolding && rightHand.cursor) {
@@ -383,6 +424,13 @@ function Editable3DObject({
         }
 
         const rect = mountRef.current.getBoundingClientRect();
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(
+            ((x - rect.left) / rect.width) * 2 - 1,
+            -((y - rect.top) / rect.height) * 2 + 1
+        );
+        raycaster.setFromCamera(mouse, cameraRef.current!);
         // If a marker is hovered, begin dragging it.
         if (hoveredMarkerRef.current) {
             activeMarkerRef.current = hoveredMarkerRef.current;
@@ -403,13 +451,7 @@ function Editable3DObject({
             cameraRef.current!.getWorldDirection(camDir);
             plane.setFromNormalAndCoplanarPoint(camDir, markerWorldPos);
             dragPlaneRef.current = plane;
-            // Compute the drag offset.
-            const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2(
-                ((x - rect.left) / rect.width) * 2 - 1,
-                -((y - rect.top) / rect.height) * 2 + 1
-            );
-            raycaster.setFromCamera(mouse, cameraRef.current!);
+
             const intersectionPoint = new THREE.Vector3();
             if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
                 dragOffsetRef.current
@@ -428,62 +470,46 @@ function Editable3DObject({
             }
             return; // Exit early – we're now dragging a marker.
         }
-        // Otherwise, try to detect if the cursor is over a cube face.
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2(
-            ((x - rect.left) / rect.width) * 2 - 1,
-            -((y - rect.top) / rect.height) * 2 + 1
-        );
-        raycaster.setFromCamera(mouse, cameraRef.current!);
-        // Intersect all objects in the main group; the cube face should be the faceMesh.
-        const intersects = raycaster.intersectObjects(
-            mainGroupRef.current.children,
-            true
-        );
-        let cubeFound = false;
-        for (let intersect of intersects) {
-            // If the intersected object is the cube's face (named "faceMesh") or its child.
-            if (
-                intersect.object.name === "faceMesh" ||
-                (intersect.object.parent &&
-                    intersect.object.parent.name === "faceMesh")
-            ) {
-                // The cube group is the parent of the face mesh.
-                const cubeGroup = intersect.object.parent!;
-                activeCubeRef.current = cubeGroup;
 
-                // Create a drag plane that passes through the cube's current position.
-                const cubeWorldPos = new THREE.Vector3();
-                cubeGroup.getWorldPosition(cubeWorldPos);
-                const plane = new THREE.Plane();
-                const camDir = new THREE.Vector3();
-                cameraRef.current!.getWorldDirection(camDir);
-                plane.setFromNormalAndCoplanarPoint(camDir, cubeWorldPos);
-                dragPlaneRef.current = plane;
+        // If the intersected object is the cube's face (named "faceMesh") or its child.
+        if (hoveredObjectRef.current) {
+            activeObjectRef.current = hoveredObjectRef.current;
+            const objectWorldPos = new THREE.Vector3();
+            hoveredObjectRef.current.getWorldPosition(objectWorldPos);
 
-                // Compute the drag offset.
-                const intersectionPoint = new THREE.Vector3();
-                if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
-                    dragOffsetRef.current
-                        .copy(cubeWorldPos)
-                        .sub(intersectionPoint);
-                }
-                cubeFound = true;
-                // NEW: Record the initial hand depth if using hand input.
-                if (source !== "mouse") {
-                    const hand =
-                        interactionStateRef.current?.[
-                            source === "rightHand" ? "Right" : "Left"
-                        ];
-                    if (hand && typeof hand.depth === "number") {
-                        initialHandDepthRef.current[source] = hand.depth;
-                    }
-                }
-                break;
+            if (hoveredObjectRef.current.parent) {
+                const localPos = objectWorldPos.clone();
+                hoveredObjectRef.current.parent.worldToLocal(localPos);
+                targetCubePositionRef.current.copy(localPos);
+            } else {
+                targetCubePositionRef.current.copy(objectWorldPos);
             }
-        }
-        if (cubeFound) {
-            return; // Begin dragging the cube.
+
+            const plane = new THREE.Plane();
+            const camDir = new THREE.Vector3();
+            cameraRef.current!.getWorldDirection(camDir);
+            plane.setFromNormalAndCoplanarPoint(camDir, objectWorldPos);
+            dragPlaneRef.current = plane;
+
+            const intersectionPoint = new THREE.Vector3();
+            if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
+                dragOffsetRef.current
+                    .copy(objectWorldPos)
+                    .sub(intersectionPoint);
+            }
+
+            // NEW: Record the initial hand depth if using hand input.
+            if (source !== "mouse") {
+                const hand =
+                    interactionStateRef.current?.[
+                        source === "rightHand" ? "Right" : "Left"
+                    ];
+                if (hand && typeof hand.depth === "number") {
+                    initialHandDepthRef.current[source] = hand.depth;
+                }
+            }
+
+            return;
         }
 
         // Otherwise, start rotating the scene.
@@ -549,7 +575,7 @@ function Editable3DObject({
         pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
 
         // ── DRAGGING A CUBE ──
-        if (activeCubeRef.current && dragPlaneRef.current) {
+        if (activeObjectRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
                 ((x - rect.left) / rect.width) * 2 - 1,
@@ -584,7 +610,7 @@ function Editable3DObject({
                         .clone()
                         .multiplyScalar(deltaDepth * depthSensitivity);
                     const newPosition = intersectionPoint.add(additionalOffset);
-                    const parent = activeCubeRef.current.parent;
+                    const parent = activeObjectRef.current.parent;
                     if (parent) {
                         parent.worldToLocal(newPosition);
                     }
@@ -598,7 +624,7 @@ function Editable3DObject({
                         )
                     ) {
                         intersectionPoint.add(dragOffsetRef.current);
-                        const parent = activeCubeRef.current.parent;
+                        const parent = activeObjectRef.current.parent;
                         if (parent) {
                             parent.worldToLocal(intersectionPoint);
                         }
@@ -614,7 +640,7 @@ function Editable3DObject({
                     )
                 ) {
                     intersectionPoint.add(dragOffsetRef.current);
-                    const parent = activeCubeRef.current.parent;
+                    const parent = activeObjectRef.current.parent;
                     if (parent) {
                         parent.worldToLocal(intersectionPoint);
                     }
@@ -716,7 +742,7 @@ function Editable3DObject({
     const cursorUp = () => {
         isDraggingRef.current = false;
         activeMarkerRef.current = null;
-        activeCubeRef.current = null;
+        activeObjectRef.current = null;
         dragPlaneRef.current = null;
         // Clear stored initial depths.
         initialHandDepthRef.current.leftHand = null;

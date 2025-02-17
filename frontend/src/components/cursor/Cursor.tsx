@@ -55,8 +55,6 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
 
     // NEW: Handlers for menu options
     const handleResetCamera = () => {
-        console.log("Reset Camera clicked");
-
         resetCamera();
 
         menuRef.current = null;
@@ -70,10 +68,8 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     };
 
     const handleInsertCube = () => {
-        console.log("Insert Cube clicked");
-
         createCube(
-            "cube",
+            `cube-${Math.random().toString(36).substring(2, 9)}`,
             new THREE.Vector3(0, 0, 0),
             Math.random() * 0xffffff
         );
@@ -156,49 +152,11 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
             // Simulate button hover using the absolute position of the cursor.
             const absoluteCursorX = targetX + xOffset;
             const absoluteCursorY = targetY + yOffset;
-            const buttons = document.querySelectorAll(".button-column .button");
-            buttons.forEach((button) => {
-                const rect = button.getBoundingClientRect();
-                const toleranceX = rect.width * 0.2; // 20% tolerance on width
-                const toleranceY = rect.height * 0.2; // 20% tolerance on height
-                const isHovering =
-                    absoluteCursorX >= rect.left - toleranceX &&
-                    absoluteCursorX <= rect.right + toleranceX &&
-                    absoluteCursorY >= rect.top - toleranceY &&
-                    absoluteCursorY <= rect.bottom + toleranceY;
-
-                if (isHovering) {
-                    // If not already hovered, start hover detection.
-                    if (!hoverStartTimes.current.has(button)) {
-                        button.classList.add("simulated-hover");
-                        const startTime = Date.now();
-                        hoverStartTimes.current.set(button, startTime);
-                        // Start a timer that triggers a click after 1000ms if still hovered.
-                        const timerId = window.setTimeout(() => {
-                            if (button.classList.contains("simulated-hover")) {
-                                (button as HTMLButtonElement).click();
-                            }
-                            hoverTimers.current.delete(button);
-                            hoverStartTimes.current.delete(button);
-                        }, 1000);
-                        hoverTimers.current.set(button, timerId);
-                    }
-                } else {
-                    if (hoverStartTimes.current.has(button)) {
-                        button.classList.remove("simulated-hover");
-                        const timerId = hoverTimers.current.get(button);
-                        if (timerId) {
-                            clearTimeout(timerId);
-                        }
-                        hoverTimers.current.delete(button);
-                        hoverStartTimes.current.delete(button);
-                    }
-                }
-            });
 
             // Calculate the progress value from menu button hover only.
             let resetProgress = 0;
             let insertProgress = 0;
+
             if (resetHoverStartRef.current) {
                 resetProgress = Math.min(
                     (Date.now() - resetHoverStartRef.current) / 1000,
@@ -306,6 +264,17 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
                         }
                         insertBtnRef.current.style.background = "";
                     }
+                }
+            } else {
+                if (insertHoverTimerRef.current) {
+                    clearTimeout(insertHoverTimerRef.current);
+                    insertHoverTimerRef.current = null;
+                    insertHoverStartRef.current = null;
+                }
+                if (resetHoverTimerRef.current) {
+                    clearTimeout(resetHoverTimerRef.current);
+                    resetHoverTimerRef.current = null;
+                    resetHoverStartRef.current = null;
                 }
             }
         };

@@ -284,7 +284,6 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         resetCameraRef.current = true;
 
         if (!cameraRef.current) return;
-        console.log("Resetting camera");
 
         // Reset camera position & orientation.
         const newPos = new THREE.Vector3(0, 3, 5);

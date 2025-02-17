@@ -97,8 +97,6 @@ function Editable3DObject({
 
             renderScene();
 
-            const raycaster = new THREE.Raycaster();
-
             // Smoothly interpolate the main group's rotation toward the target.
             if (mainGroupRef.current) {
                 const smoothingFactor = 0.1; // Adjust for desired smoothness
@@ -217,7 +215,7 @@ function Editable3DObject({
                 pointerRef.current.x =
                     (handCursor.coords.x / rect.width) * 2 - 1;
                 pointerRef.current.y =
-                    -((handCursor.coords.y - rect.top) / rect.height) * 2 + 1;
+                    -(handCursor.coords.y / rect.height) * 2 + 1;
             }
 
             // ── Update marker highlighting via raycasting ──
@@ -427,8 +425,8 @@ function Editable3DObject({
 
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2(
-            ((x - rect.left) / rect.width) * 2 - 1,
-            -((y - rect.top) / rect.height) * 2 + 1
+            (x / rect.width) * 2 - 1,
+            -(y / rect.height) * 2 + 1
         );
         raycaster.setFromCamera(mouse, cameraRef.current!);
         // If a marker is hovered, begin dragging it.
@@ -571,15 +569,15 @@ function Editable3DObject({
         }
 
         const rect = mountRef.current.getBoundingClientRect();
-        pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
-        pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
+        pointerRef.current.x = (x / rect.width) * 2 - 1;
+        pointerRef.current.y = -(y / rect.height) * 2 + 1;
 
         // ── DRAGGING A CUBE ──
         if (activeObjectRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
-                ((x - rect.left) / rect.width) * 2 - 1,
-                -((y - rect.top) / rect.height) * 2 + 1
+                (x / rect.width) * 2 - 1,
+                -(y / rect.height) * 2 + 1
             );
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
@@ -654,8 +652,8 @@ function Editable3DObject({
         if (activeMarkerRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
-                ((x - rect.left) / rect.width) * 2 - 1,
-                -((y - rect.top) / rect.height) * 2 + 1
+                (x / rect.width) * 2 - 1,
+                -(y / rect.height) * 2 + 1
             );
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
@@ -670,7 +668,7 @@ function Editable3DObject({
                     const initialDepth =
                         initialHandDepthRef.current[source] ?? hand.depth;
                     const deltaDepth = initialDepth - hand.depth;
-                    const depthSensitivity = 10; // Adjust as needed
+                    const depthSensitivity = 50; // Adjust as needed
 
                     if (
                         raycaster.ray.intersectPlane(

@@ -253,7 +253,7 @@ function useSkeleton({
             2;
 
         // Set thresholds relative to hand spread: adjust factors as needed
-        const pinchThreshold = 0.25 * handSpread; // Fingers must be within this radius to be considered pinching
+        const pinchThreshold = 0.3 * handSpread; // Fingers must be within this radius to be considered pinching
         const avgDistance =
             distances.reduce((a, b) => a + b, 0) / distances.length;
         const variance =
@@ -555,7 +555,9 @@ function useSkeleton({
             // Commit the raw pinching value (you can debounce or smooth if needed)
             committedPinching.current[handSide] = isPinching;
             const newInteractionStateHand: InteractionStateHand = {
-                isHolding: committedHolding.current[handSide],
+                isHolding:
+                    committedHolding.current[handSide] &&
+                    !committedPinching.current[handSide],
                 isPinching: committedPinching.current[handSide],
                 cursor: {
                     coords: newCoords,

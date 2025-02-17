@@ -21,6 +21,7 @@ interface Editable3DContextType {
         position: THREE.Vector3,
         color: number
     ) => THREE.Group;
+    resetCamera: () => void;
     objectsRef: React.MutableRefObject<{
         [key: string]: THREE.Group<THREE.Object3DEventMap>;
     }>;
@@ -31,6 +32,7 @@ interface Editable3DContextType {
     rendererRef: React.MutableRefObject<THREE.WebGLRenderer>;
     cornerMarkersRef: React.MutableRefObject<THREE.Mesh[]>;
     zoomRef: React.MutableRefObject<number>;
+    resetCameraRef: React.MutableRefObject<boolean>;
     renameObject: (oldName: string, newName: string) => void;
     updateCubeGeometry: (faceMesh: THREE.Mesh) => void;
 }
@@ -56,6 +58,8 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
     const cornerMarkersRef = useRef<THREE.Mesh[]>([]);
 
     const zoomRef = useRef(1);
+
+    const resetCameraRef = useRef(false);
 
     const setupScene = (mountRef: React.RefObject<HTMLDivElement>) => {
         if (!mountRef.current) return;
@@ -276,6 +280,31 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         }
     };
 
+    const resetCamera = () => {
+        resetCameraRef.current = true;
+
+        if (!cameraRef.current) return;
+        console.log("Resetting camera");
+
+        // Reset camera position & orientation.
+        const newPos = new THREE.Vector3(0, 3, 5);
+        cameraRef.current.position.copy(newPos);
+        cameraRef.current.lookAt(0, 0, 0);
+        cameraRef.current.updateProjectionMatrix();
+
+        // Reset the main group's rotation and zoom.
+        if (mainGroupRef.current) {
+            mainGroupRef.current.rotation.set(0, 0, 0);
+            mainGroupRef.current.scale.set(1, 1, 1);
+        }
+
+        // Reset zoom ref if used elsewhere.
+        zoomRef.current = 1;
+
+        // Force re-render the scene so the new settings take effect immediately.
+        renderScene();
+    };
+
     const registerObject = (
         objectName: string,
         object: THREE.Group<THREE.Object3DEventMap>
@@ -309,6 +338,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
             unregisterObject,
             setupScene,
             createCube,
+            resetCamera,
             renderScene,
             objectsRef,
             cameraRef,
@@ -317,6 +347,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
             rendererRef,
             cornerMarkersRef,
             zoomRef,
+            resetCameraRef,
             updateCubeGeometry,
         };
     }, []);

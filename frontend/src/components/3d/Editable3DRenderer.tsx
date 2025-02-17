@@ -57,7 +57,7 @@ function Editable3DObject({
         rightHand: null,
     });
 
-    // Get setScene from our context
+    // Get setScene from our context.
     const {
         setupScene,
         createCube,
@@ -67,6 +67,7 @@ function Editable3DObject({
         cornerMarkersRef,
         zoomRef,
         rendererRef,
+        resetCameraRef,
     } = useEditable3D();
 
     // ────────────────────────────────────────────────────────────────
@@ -113,6 +114,15 @@ function Editable3DObject({
 
             // Smoothly update camera position using a delta-based approach.
             if (cameraRef.current) {
+                if (resetCameraRef.current) {
+                    targetCameraPositionRef.current.copy(
+                        cameraRef.current.position
+                    );
+                    targetZoomRef.current = 1;
+                    targetRotationRef.current = { x: 0, y: 0 };
+                    resetCameraRef.current = false;
+                    return;
+                }
                 const lerpFactor = 0.1; // Adjust this smoothing factor as needed.
                 const currPos = cameraRef.current.position;
                 const delta = targetCameraPositionRef.current
@@ -177,7 +187,7 @@ function Editable3DObject({
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
             }
 
-            // Smoothly update the cube’s position when dragging.
+            // Smoothly update the cube's position when dragging.
             if (activeCubeRef.current) {
                 activeCubeRef.current.position.lerp(
                     targetCubePositionRef.current,
@@ -185,7 +195,7 @@ function Editable3DObject({
                 );
             }
 
-            // NEW: Smoothly update the marker’s (vertex) position when dragging.
+            // NEW: Smoothly update the marker's (vertex) position when dragging.
             if (activeMarkerRef.current) {
                 activeMarkerRef.current.position.lerp(
                     targetMarkerPositionRef.current,
@@ -510,22 +520,23 @@ function Editable3DObject({
 
             const dx = x - lastMousePosition.current[source].x;
             const dy = y - lastMousePosition.current[source].y;
-            const panSensitivity = 0.01; // Adjust sensitivity as needed
+            const panSensitivity = 0.1; // Adjust sensitivity as needed
 
-            console.log("Panning camera:", {
-                dx,
-                dy,
-                panSensitivity,
-                current: { x, y },
-                last: lastMousePosition.current[source],
-            });
-
-            // Instead of updating cameraRef.current directly, update the target ref.
+            // NEW: Update the target camera position using lerping.
             if (cameraRef.current) {
-                const newCamPos = cameraRef.current.position.clone();
-                newCamPos.x -= dx * panSensitivity;
-                newCamPos.y += dy * panSensitivity;
-                targetCameraPositionRef.current.copy(newCamPos);
+                const panDelta = new THREE.Vector3(
+                    -dx * panSensitivity,
+                    dy * panSensitivity,
+                    0
+                );
+                const desiredTarget = targetCameraPositionRef.current
+                    .clone()
+                    .add(panDelta);
+                const panLerpFactor = 0.1; // Adjust lerp factor as needed.
+                targetCameraPositionRef.current.lerp(
+                    desiredTarget,
+                    panLerpFactor
+                );
             }
 
             // Update pointer position for next frame.
@@ -554,11 +565,10 @@ function Editable3DObject({
                         source === "rightHand" ? "Right" : "Left"
                     ];
                 if (hand && typeof hand.depth === "number") {
-                    // Compute the change in depth from when the drag started.
                     const initialDepth =
                         initialHandDepthRef.current[source] ?? hand.depth;
                     const deltaDepth = initialDepth - hand.depth;
-                    const depthSensitivity = 10; // Adjust sensitivity constant as needed
+                    const depthSensitivity = 50; // Adjust sensitivity constant as needed
 
                     // Use the usual drag-plane intersection as the base.
                     if (
@@ -698,15 +708,6 @@ function Editable3DObject({
             const sensitivity = 0.01;
             targetRotationRef.current.x += dy * sensitivity;
             targetRotationRef.current.y += dx * sensitivity;
-            if (dx !== 0 || dy !== 0) {
-                console.log("Rotating scene:", {
-                    dx,
-                    dy,
-                    sensitivity,
-                    current: { x, y },
-                    last: lastMousePosition.current[source],
-                });
-            }
         }
 
         lastMousePosition.current[source] = { x, y };

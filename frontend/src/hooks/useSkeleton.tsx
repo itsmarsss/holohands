@@ -107,6 +107,11 @@ function useSkeleton({
         Left: null,
         Right: null,
     });
+    // NEW: Add a committed state for pinching
+    const committedPinching = useRef<Record<"Left" | "Right", boolean>>({
+        Left: false,
+        Right: false,
+    });
     // ───────────────────────────────────────────────────────────────────────────
 
     // ─── ADD NEW REFS FOR SMOOTHING CURSOR POSITION ─────────────────────────────
@@ -220,57 +225,47 @@ function useSkeleton({
     }, []);
 
     const calculatePinching = useCallback((hand: Hand) => {
-        // Moving average of index-thumb distance
-        const movingAverageIndexThumb =
-            distanceHistoryIndexThumb.current[hand.handedness].reduce(
-                (sum, val) => sum + val,
-                0
-            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
+        // Use fingertips for pinch detection: thumb tip (4), index tip (8), middle tip (12), ring tip (16), pinky tip (20)
+        const fingertipIndices = [4, 8, 12, 16, 20];
+        const fingertipPoints = fingertipIndices.map((i) => hand.landmarks[i]);
 
-        // Moving average of middle-thumb distance
-        const movingAverageMiddleThumb =
-            distanceHistoryMiddleThumb.current[hand.handedness].reduce(
-                (sum, val) => sum + val,
-                0
-            ) / distanceHistoryMiddleThumb.current[hand.handedness].length;
+        // Compute the centroid of the fingertips
+        const centroid = [
+            fingertipPoints.reduce((sum, p) => sum + p[0], 0) /
+                fingertipPoints.length,
+            fingertipPoints.reduce((sum, p) => sum + p[1], 0) /
+                fingertipPoints.length,
+        ];
 
-        // Variance of index-thumb distance
-        const varianceIndexThumb =
-            distanceHistoryIndexThumb.current[hand.handedness].reduce(
-                (sum, val) => sum + Math.pow(val - movingAverageIndexThumb, 2),
-                0
-            ) / distanceHistoryIndexThumb.current[hand.handedness].length;
+        // Compute distances from the centroid to each fingertip
+        const distances = fingertipPoints.map((p) =>
+            Math.hypot(p[0] - centroid[0], p[1] - centroid[1])
+        );
+        const maxDistance = Math.max(...distances);
 
-        const stdDevIndexThumb = Math.sqrt(varianceIndexThumb);
-
-        // Variance of middle-thumb distance
-        const varianceMiddleThumb =
-            distanceHistoryMiddleThumb.current[hand.handedness].reduce(
-                (sum, val) => sum + Math.pow(val - movingAverageMiddleThumb, 2),
-                0
-            ) / distanceHistoryMiddleThumb.current[hand.handedness].length;
-
-        const stdDevMiddleThumb = Math.sqrt(varianceMiddleThumb);
-
-        // Compute hand spread to determine a relative pinch threshold.
+        // Compute hand spread using all landmarks (for normalization)
         const xValues = hand.landmarks.map((lm) => lm[0]);
         const yValues = hand.landmarks.map((lm) => lm[1]);
-        const avgDistance =
+        const handSpread =
             (Math.max(...xValues) -
                 Math.min(...xValues) +
-                Math.max(...yValues) -
-                Math.min(...yValues)) /
+                (Math.max(...yValues) - Math.min(...yValues))) /
             2;
 
-        // Thresholds
-        const pinchThreshold = 0.35 * avgDistance;
-        const stabilityThreshold = 0.05 * avgDistance;
+        // Set thresholds relative to hand spread: adjust factors as needed
+        const pinchThreshold = 0.25 * handSpread; // Fingers must be within this radius to be considered pinching
+        const avgDistance =
+            distances.reduce((a, b) => a + b, 0) / distances.length;
+        const variance =
+            distances.reduce(
+                (sum, d) => sum + Math.pow(d - avgDistance, 2),
+                0
+            ) / distances.length;
+        const stdDev = Math.sqrt(variance);
+        const stabilityThreshold = 0.1 * handSpread; // Fingers must be similarly positioned
 
         let isPinching =
-            movingAverageIndexThumb < pinchThreshold &&
-            stdDevIndexThumb < stabilityThreshold &&
-            movingAverageMiddleThumb < pinchThreshold &&
-            stdDevMiddleThumb < stabilityThreshold;
+            maxDistance < pinchThreshold && stdDev < stabilityThreshold;
 
         const currentTime = Date.now();
         if (isPinching) {
@@ -498,7 +493,7 @@ function useSkeleton({
                 indexFinger[0] * scaleX,
                 indexFinger[1] * scaleY,
                 thumbFinger[0] * scaleX,
-                thumbFinger[1] * scaleY
+                thumbFinger[1] * scaleX
             );
             const pointerAngle = smoothValue(
                 previousPointerAngle.current,
@@ -557,16 +552,16 @@ function useSkeleton({
                 y: smoothedCursor.y,
             };
 
-            // Note: Here we use the debounced (committed) holding value.
-            // We also add the computed depth value.
+            // Commit the raw pinching value (you can debounce or smooth if needed)
+            committedPinching.current[handSide] = isPinching;
             const newInteractionStateHand: InteractionStateHand = {
                 isHolding: committedHolding.current[handSide],
-                isPinching,
+                isPinching: committedPinching.current[handSide],
                 cursor: {
                     coords: newCoords,
                     angle: pointerAngle,
                 },
-                depth, // <-- Depth estimation added here
+                depth,
             };
 
             // Ensure that the handedness is typed correctly

@@ -75,12 +75,14 @@ function Cursor({ name, handRef, overlayCanvasRef, speed }: CursorProps) {
                 };
 
             // Use GSAP to animate the cursor's position.
-            gsap.to(cursorRef.current, {
-                left: `${targetX}px`,
-                top: `${targetY + yOffset}px`,
-                duration: speed, // Use the customizable speed
-                ease: "power2.out", // Easing function for smoothness
-            });
+            cursorRef.current.style.left = `${targetX}px`;
+            cursorRef.current.style.top = `${targetY + yOffset}px`;
+            // gsap.to(cursorRef.current, {
+            //     left: `${targetX}px`,
+            //     top: `${targetY + yOffset}px`,
+            //     duration: speed, // Use the customizable speed
+            //     ease: "power2.out", // Easing function for smoothness
+            // });
 
             // Simulate button hover using the absolute position of the cursor.
             const absoluteCursorX = targetX + xOffset;

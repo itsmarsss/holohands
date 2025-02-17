@@ -4,7 +4,6 @@ import { useEffect, useRef } from "react";
 import { Coords, DEFAULT_COORDS } from "../../objects/coords";
 import React from "react";
 import { useEditable3D } from "../../provider/Editable3DContext";
-import { ThreeMFLoader } from "three/examples/jsm/Addons.js";
 
 interface Editable3DObjectProps {
     interactionStateRef: React.MutableRefObject<InteractionState>;
@@ -37,6 +36,11 @@ function Editable3DObject({
     const dragOffsetRef = useRef(new THREE.Vector3());
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
+    // New ref for dragging the entire cube
+    const activeCubeRef = useRef<THREE.Object3D<THREE.Object3DEventMap> | null>(
+        null
+    );
+
     // Keep an up-to-date copy of the interaction state for hand–based gestures.
     const interactionStateRef = useRef<InteractionState | null>(
         interactionState.current
@@ -60,10 +64,21 @@ function Editable3DObject({
     // Set up scene, camera, renderer and add our editable cubes.
     // ────────────────────────────────────────────────────────────────
 
+    // Create a target ref – we will update it after the camera is created.
+    const targetCameraPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
+    // (Optional) For dragging objects, you can add a target ref.
+    const targetCubePositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
     useEffect(() => {
         if (!mountRef.current) return;
 
         setupScene(mountRef);
+
+        // IMPORTANT: After set up, update the target camera ref to match the actual camera position.
+        if (cameraRef.current) {
+            targetCameraPositionRef.current.copy(cameraRef.current.position);
+        }
 
         const animate = () => {
             requestAnimationFrame(animate);
@@ -87,6 +102,30 @@ function Editable3DObject({
                 );
             }
 
+            // Smoothly update camera position using a delta-based approach.
+            if (cameraRef.current) {
+                const lerpFactor = 0.1; // Adjust this smoothing factor as needed.
+                const currPos = cameraRef.current.position;
+                const delta = targetCameraPositionRef.current
+                    .clone()
+                    .sub(currPos);
+                const distance = delta.length();
+
+                const threshold = 0.01; // Increase threshold if needed.
+                if (distance < threshold) {
+                    cameraRef.current.position.copy(
+                        targetCameraPositionRef.current
+                    );
+                } else {
+                    // Move the camera fractionally toward the target.
+                    cameraRef.current.position.add(
+                        delta.multiplyScalar(lerpFactor)
+                    );
+                }
+
+                cameraRef.current.updateProjectionMatrix();
+            }
+
             // ── Handle dual–pinch zoom: Only when both hands are holding (pinching) ──
             const leftHand = interactionStateRef.current?.Left;
             const rightHand = interactionStateRef.current?.Right;
@@ -108,7 +147,7 @@ function Editable3DObject({
                     // Update the target zoom instead of directly setting scale.
                     let newTargetZoom =
                         targetZoomRef.current + distanceDelta * zoomSensitivity;
-                    newTargetZoom = Math.max(0.5, Math.min(5, newTargetZoom));
+                    newTargetZoom = Math.max(0.05, Math.min(10, newTargetZoom));
                     targetZoomRef.current = newTargetZoom;
                     previousPinchDistanceRef.current = currentDistance;
                 }
@@ -243,6 +282,14 @@ function Editable3DObject({
                 cursorUp();
                 lastMousePosition.current["leftHand"] = DEFAULT_COORDS;
             }
+
+            // (Optional) If dragging an object (e.g. a cube), update its position smoothly.
+            if (activeCubeRef.current) {
+                activeCubeRef.current.position.lerp(
+                    targetCubePositionRef.current,
+                    0.1
+                );
+            }
         };
         animate();
 
@@ -255,7 +302,7 @@ function Editable3DObject({
         resizeObserver.observe(mountRef.current);
 
         return () => {
-            // resizeObserver.disconnect();
+            resizeObserver.disconnect();
             rendererRef.current!.dispose();
             if (mountRef.current) {
                 mountRef.current.removeChild(rendererRef.current!.domElement);
@@ -300,6 +347,15 @@ function Editable3DObject({
         source: "mouse" | "leftHand" | "rightHand"
     ) => {
         if (!mountRef.current) return;
+        // If the input is from a hand and both hands are holding, disable drag actions.
+        if (
+            source !== "mouse" &&
+            interactionStateRef.current &&
+            interactionStateRef.current.Left?.isHolding &&
+            interactionStateRef.current.Right?.isHolding
+        ) {
+            return;
+        }
 
         const rect = mountRef.current.getBoundingClientRect();
         // If a marker is hovered, begin dragging it.
@@ -328,6 +384,54 @@ function Editable3DObject({
             }
             return; // Exit early – we're now dragging a marker.
         }
+        // Otherwise, try to detect if the cursor is over a cube face.
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(
+            ((x - rect.left) / rect.width) * 2 - 1,
+            -((y - rect.top) / rect.height) * 2 + 1
+        );
+        raycaster.setFromCamera(mouse, cameraRef.current!);
+        // Intersect all objects in the main group; the cube face should be the faceMesh.
+        const intersects = raycaster.intersectObjects(
+            mainGroupRef.current.children,
+            true
+        );
+        let cubeFound = false;
+        for (let intersect of intersects) {
+            // If the intersected object is the cube's face (named "faceMesh") or its child.
+            if (
+                intersect.object.name === "faceMesh" ||
+                (intersect.object.parent &&
+                    intersect.object.parent.name === "faceMesh")
+            ) {
+                // The cube group is the parent of the face mesh.
+                const cubeGroup = intersect.object.parent!;
+                activeCubeRef.current = cubeGroup;
+
+                // Create a drag plane that passes through the cube's current position.
+                const cubeWorldPos = new THREE.Vector3();
+                cubeGroup.getWorldPosition(cubeWorldPos);
+                const plane = new THREE.Plane();
+                const camDir = new THREE.Vector3();
+                cameraRef.current!.getWorldDirection(camDir);
+                plane.setFromNormalAndCoplanarPoint(camDir, cubeWorldPos);
+                dragPlaneRef.current = plane;
+
+                // Compute the drag offset.
+                const intersectionPoint = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(plane, intersectionPoint)) {
+                    dragOffsetRef.current
+                        .copy(cubeWorldPos)
+                        .sub(intersectionPoint);
+                }
+                cubeFound = true;
+                break;
+            }
+        }
+        if (cubeFound) {
+            return; // Begin dragging the cube.
+        }
+
         // Otherwise, start rotating the scene.
         isDraggingRef.current = true;
         lastMousePosition.current[source] = { x, y };
@@ -340,9 +444,83 @@ function Editable3DObject({
     ) => {
         if (!mountRef.current) return;
 
+        // If both hand inputs are holding, pan the camera accordingly.
+        if (
+            source !== "mouse" &&
+            interactionStateRef.current &&
+            interactionStateRef.current.Left?.isHolding &&
+            interactionStateRef.current.Right?.isHolding
+        ) {
+            // Initialize the pointer position if needed.
+            if (
+                lastMousePosition.current[source].x === 0 &&
+                lastMousePosition.current[source].y === 0
+            ) {
+                lastMousePosition.current[source] = { x, y };
+                console.log("Initializing lastMousePosition for", source, {
+                    x,
+                    y,
+                });
+                return;
+            }
+
+            const dx = x - lastMousePosition.current[source].x;
+            const dy = y - lastMousePosition.current[source].y;
+            const panSensitivity = 0.01; // Adjust sensitivity as needed
+
+            console.log("Panning camera:", {
+                dx,
+                dy,
+                panSensitivity,
+                current: { x, y },
+                last: lastMousePosition.current[source],
+            });
+
+            // Instead of updating cameraRef.current directly, update the target ref.
+            if (cameraRef.current) {
+                const newCamPos = cameraRef.current.position.clone();
+                newCamPos.x -= dx * panSensitivity;
+                newCamPos.y += dy * panSensitivity;
+                targetCameraPositionRef.current.copy(newCamPos);
+            }
+
+            // Update pointer position for next frame.
+            lastMousePosition.current[source] = { x, y };
+            return;
+        }
+
         const rect = mountRef.current.getBoundingClientRect();
         pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
         pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
+
+        // If dragging a cube (and not a marker), update the cube's position.
+        if (activeCubeRef.current && dragPlaneRef.current) {
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2(
+                ((x - rect.left) / rect.width) * 2 - 1,
+                -((y - rect.top) / rect.height) * 2 + 1
+            );
+            raycaster.setFromCamera(mouse, cameraRef.current!);
+            const intersectionPoint = new THREE.Vector3();
+            if (
+                raycaster.ray.intersectPlane(
+                    dragPlaneRef.current,
+                    intersectionPoint
+                )
+            ) {
+                intersectionPoint.add(dragOffsetRef.current);
+                const parent = activeCubeRef.current.parent;
+                if (parent) {
+                    const localPos = parent.worldToLocal(
+                        intersectionPoint.clone()
+                    );
+                    activeCubeRef.current.position.copy(localPos);
+                } else {
+                    activeCubeRef.current.position.copy(intersectionPoint);
+                }
+            }
+            return;
+        }
 
         // If dragging a marker, update its position.
         if (activeMarkerRef.current && dragPlaneRef.current) {
@@ -361,44 +539,48 @@ function Editable3DObject({
             ) {
                 intersectionPoint.add(dragOffsetRef.current);
                 const parent = activeMarkerRef.current.parent;
-                const dragSmoothing = 0.1; // Adjust for desired smoothness
                 if (parent) {
                     const localPos = parent.worldToLocal(
                         intersectionPoint.clone()
                     );
-                    activeMarkerRef.current.position.lerp(
-                        localPos,
-                        dragSmoothing
-                    );
-                    // Update the cube's geometry.
+                    activeMarkerRef.current.position.copy(localPos);
+                    // Update cube geometry.
                     const cubeGroup = parent.parent;
                     if (cubeGroup && cubeGroup.userData.updateGeometry) {
                         cubeGroup.userData.updateGeometry();
                     }
                 } else {
-                    activeMarkerRef.current.position.lerp(
-                        intersectionPoint,
-                        dragSmoothing
-                    );
+                    activeMarkerRef.current.position.copy(intersectionPoint);
                 }
             }
             return;
         }
 
-        // When dragging the scene (i.e. no marker is active), update the target rotation.
+        // When dragging the scene, update target rotation.
         if (isDraggingRef.current) {
             const dx = x - lastMousePosition.current[source].x;
             const dy = y - lastMousePosition.current[source].y;
             const sensitivity = 0.01;
-            targetRotationRef.current.y += dx * sensitivity;
             targetRotationRef.current.x += dy * sensitivity;
+            targetRotationRef.current.y += dx * sensitivity;
+            if (dx !== 0 || dy !== 0) {
+                console.log("Rotating scene:", {
+                    dx,
+                    dy,
+                    sensitivity,
+                    current: { x, y },
+                    last: lastMousePosition.current[source],
+                });
+            }
         }
+
         lastMousePosition.current[source] = { x, y };
     };
 
     const cursorUp = () => {
         isDraggingRef.current = false;
         activeMarkerRef.current = null;
+        activeCubeRef.current = null;
         dragPlaneRef.current = null;
     };
 
@@ -424,7 +606,7 @@ function Editable3DObject({
                 const sensitivity = 0.002;
                 let currentZoom = mainGroupRef.current.scale.x;
                 let newZoom = currentZoom - e.deltaY * sensitivity;
-                newZoom = Math.max(0.5, Math.min(5, newZoom));
+                newZoom = Math.max(0.05, Math.min(10, newZoom));
                 // Update both the main group's scale and the target zoom.
                 mainGroupRef.current.scale.set(newZoom, newZoom, newZoom);
                 targetZoomRef.current = newZoom;

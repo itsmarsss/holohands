@@ -114,6 +114,15 @@ function useSkeleton({
     });
     // ───────────────────────────────────────────────────────────────────────────
 
+    // ─── ADD NEW REFS FOR SMOOTHING CURSOR POSITION ─────────────────────────────
+    const previousCursor = useRef<
+        Record<"Left" | "Right", { x: number; y: number } | null>
+    >({
+        Left: null,
+        Right: null,
+    });
+    // ───────────────────────────────────────────────────────────────────────────
+
     const { debug } = useDebug();
 
     // Create a mutable ref for debug that updates whenever the context value changes.
@@ -203,7 +212,7 @@ function useSkeleton({
             2;
 
         // Thresholds
-        const holdThreshold = 0.5 * avgDistance;
+        const holdThreshold = 0.25 * avgDistance;
         const stabilityThreshold = 0.05 * avgDistance;
 
         return {
@@ -328,17 +337,37 @@ function useSkeleton({
             const indexFinger = hand.landmarks[8];
             const middleFinger = hand.landmarks[12];
 
-            // Calculate cursor position
-            const cursorX = ((indexFinger[0] + thumbFinger[0]) / 2) * scaleX;
-            const cursorY = ((indexFinger[1] + thumbFinger[1]) / 2) * scaleY;
+            // ─── Calculate raw cursor position ────────────────────────────────
+            const rawCursorX = ((indexFinger[0] + thumbFinger[0]) / 2) * scaleX;
+            const rawCursorY = ((indexFinger[1] + thumbFinger[1]) / 2) * scaleY;
 
-            // Paint hand connections
+            // ─── Smooth the cursor position ───────────────────────────────────
+            let smoothedCursor;
+            if (previousCursor.current[hand.handedness]) {
+                smoothedCursor = {
+                    x: smoothValue(
+                        previousCursor.current[hand.handedness]!.x,
+                        rawCursorX,
+                        smoothingFactor
+                    ),
+                    y: smoothValue(
+                        previousCursor.current[hand.handedness]!.y,
+                        rawCursorY,
+                        smoothingFactor
+                    ),
+                };
+            } else {
+                smoothedCursor = { x: rawCursorX, y: rawCursorY };
+            }
+            previousCursor.current[hand.handedness] = smoothedCursor;
+            // ──────────────────────────────────────────────────────────────────
 
+            // Paint hand connections (if debugging)
             if (debugRef.current) {
                 paintHandConnections(hand, scaleX, scaleY, ctx);
             }
 
-            // Paint index-thumb connection
+            // Paint index-thumb connection (if debugging)
             if (debugRef.current) {
                 paintConnection(indexFinger, thumbFinger, scaleX, scaleY, ctx);
             }
@@ -418,8 +447,8 @@ function useSkeleton({
 
             // Display mode information in debug text.
             debugText(
-                cursorX,
-                cursorY - 30,
+                smoothedCursor.x,
+                smoothedCursor.y - 30,
                 `Distance: ${distanceIndexThumb.toFixed(
                     2
                 )} px, Hold Threshold: ${holdThreshold.toFixed(
@@ -428,8 +457,8 @@ function useSkeleton({
                 ctx
             );
             debugText(
-                cursorX + 20,
-                cursorY + 10,
+                smoothedCursor.x + 20,
+                smoothedCursor.y + 10,
                 isPinching ? "Pinching" : isHolding ? "Holding" : "Idle",
                 ctx
             );
@@ -480,8 +509,10 @@ function useSkeleton({
             if (hand.detected_symbols && hand.detected_symbols.length > 0) {
                 hand.detected_symbols.forEach((symbol, index) => {
                     debugText(
-                        debugRef.current ? wrist[0] * scaleX : cursorX,
-                        (debugRef.current ? wrist[1] * scaleY : cursorY) +
+                        debugRef.current ? wrist[0] * scaleX : smoothedCursor.x,
+                        (debugRef.current
+                            ? wrist[1] * scaleY
+                            : smoothedCursor.y) +
                             20 +
                             index * 20,
                         `${symbol[0]} (${(symbol[1] * 100).toFixed(2)}%)`,
@@ -491,7 +522,10 @@ function useSkeleton({
             }
 
             // Update the interaction state for the current hand.
-            const newCoords: Coords = { x: cursorX, y: cursorY };
+            const newCoords: Coords = {
+                x: smoothedCursor.x,
+                y: smoothedCursor.y,
+            };
 
             // Note: Here we use the debounced (committed) holding value.
             const newInteractionStateHand: InteractionStateHand = {

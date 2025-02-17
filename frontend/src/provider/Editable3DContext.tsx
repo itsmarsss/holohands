@@ -32,6 +32,7 @@ interface Editable3DContextType {
     cornerMarkersRef: React.MutableRefObject<THREE.Mesh[]>;
     zoomRef: React.MutableRefObject<number>;
     renameObject: (oldName: string, newName: string) => void;
+    updateCubeGeometry: (faceMesh: THREE.Mesh) => void;
 }
 
 const Editable3DContext = createContext<Editable3DContextType | null>(null);
@@ -83,7 +84,9 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         cameraRef.current.position.set(0, 3, 5);
         cameraRef.current.lookAt(0, 0, 0);
 
-        mainGroupRef.current.add(new THREE.GridHelper(26, 26));
+        // Create an infinite grid by using a large size and positioning it at the camera's height
+        const gridHelper = new THREE.GridHelper(1000, 1000);
+        mainGroupRef.current.add(gridHelper);
 
         createCube("cube1", new THREE.Vector3(0, 0, 0), 0x00ff00);
 
@@ -238,6 +241,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
         if (markers.length !== 8) return; // safety check
         // Sort markers by their stored corner index.
         markers.sort((a, b) => a.userData.cornerIndex - b.userData.cornerIndex);
+        // Extract target vertices from markers.
         const vertices = markers.map((marker) => marker.position.clone());
         const newGeometry = createHexahedronGeometry(vertices);
         faceMesh.geometry.dispose();
@@ -313,6 +317,7 @@ export const Editable3DProvider: React.FC<{ children: React.ReactNode }> = ({
             rendererRef,
             cornerMarkersRef,
             zoomRef,
+            updateCubeGeometry,
         };
     }, []);
 

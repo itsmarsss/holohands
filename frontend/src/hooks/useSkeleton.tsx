@@ -326,6 +326,34 @@ function useSkeleton({
                 imageSize.height
             );
 
+            // ─── DEPTH ESTIMATION BASED ON HAND SIZE ────────────────────────────
+            // Compute the bounding box of the hand (in canvas coordinates)
+            const xValuesScaled = hand.landmarks.map((lm) => lm[0] * scaleX);
+            const yValuesScaled = hand.landmarks.map((lm) => lm[1] * scaleY);
+            const minX = Math.min(...xValuesScaled);
+            const maxX = Math.max(...xValuesScaled);
+            const minY = Math.min(...yValuesScaled);
+            const maxY = Math.max(...yValuesScaled);
+            const handWidth = maxX - minX;
+            const handHeight = maxY - minY;
+            const handDiagonal = Math.sqrt(handWidth ** 2 + handHeight ** 2);
+
+            // Compute the diagonal of the canvas (video) for normalization
+            const canvasWidth = overlayCanvas.width;
+            const canvasHeight = overlayCanvas.height;
+            const videoDiagonal = Math.sqrt(
+                canvasWidth ** 2 + canvasHeight ** 2
+            );
+
+            // Normalize the hand size (a value between 0 and 1)
+            const normalizedHandSize = Math.min(
+                Math.max(handDiagonal / videoDiagonal, 0),
+                1
+            );
+            // Invert the ratio so that a larger hand (closer) gives a lower depth value.
+            const depth = 1 - normalizedHandSize;
+            // ──────────────────────────────────────────────────────────────────────
+
             // Calculate midpoints for cursor position
             const wrist = hand.landmarks[0];
             const thumbFinger = hand.landmarks[4];
@@ -451,6 +479,13 @@ function useSkeleton({
                 )} px, Pinch Threshold: ${pinchThreshold.toFixed(2)} px`,
                 ctx
             );
+            // Show depth estimation in the debug overlay.
+            debugText(
+                smoothedCursor.x,
+                smoothedCursor.y - 50,
+                `Depth: ${depth.toFixed(2)}`,
+                ctx
+            );
             debugText(
                 smoothedCursor.x + 20,
                 smoothedCursor.y + 10,
@@ -523,6 +558,7 @@ function useSkeleton({
             };
 
             // Note: Here we use the debounced (committed) holding value.
+            // We also add the computed depth value.
             const newInteractionStateHand: InteractionStateHand = {
                 isHolding: committedHolding.current[handSide],
                 isPinching,
@@ -530,6 +566,7 @@ function useSkeleton({
                     coords: newCoords,
                     angle: pointerAngle,
                 },
+                depth, // <-- Depth estimation added here
             };
 
             // Ensure that the handedness is typed correctly

@@ -39,7 +39,7 @@ function Editable3DObject({
     // NEW: Ref to store the target position for the currently dragged marker.
     const targetMarkerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
-    // New ref for dragging the entire cube
+    // New ref for dragging the entire cube.
     const activeCubeRef = useRef<THREE.Object3D<THREE.Object3DEventMap> | null>(
         null
     );
@@ -48,6 +48,14 @@ function Editable3DObject({
     const interactionStateRef = useRef<InteractionState | null>(
         interactionState.current
     );
+
+    // NEW: Ref to store the initial hand depth at the start of a drag.
+    const initialHandDepthRef = useRef<
+        Record<"leftHand" | "rightHand", number | null>
+    >({
+        leftHand: null,
+        rightHand: null,
+    });
 
     // Get setScene from our context
     const {
@@ -398,6 +406,16 @@ function Editable3DObject({
                     .copy(markerWorldPos)
                     .sub(intersectionPoint);
             }
+            // NEW: For hand input, record the starting depth.
+            if (source !== "mouse") {
+                const hand =
+                    interactionStateRef.current?.[
+                        source === "rightHand" ? "Right" : "Left"
+                    ];
+                if (hand && typeof hand.depth === "number") {
+                    initialHandDepthRef.current[source] = hand.depth;
+                }
+            }
             return; // Exit early – we're now dragging a marker.
         }
         // Otherwise, try to detect if the cursor is over a cube face.
@@ -441,6 +459,16 @@ function Editable3DObject({
                         .sub(intersectionPoint);
                 }
                 cubeFound = true;
+                // NEW: Record the initial hand depth if using hand input.
+                if (source !== "mouse") {
+                    const hand =
+                        interactionStateRef.current?.[
+                            source === "rightHand" ? "Right" : "Left"
+                        ];
+                    if (hand && typeof hand.depth === "number") {
+                        initialHandDepthRef.current[source] = hand.depth;
+                    }
+                }
                 break;
             }
         }
@@ -509,7 +537,7 @@ function Editable3DObject({
         pointerRef.current.x = ((x - rect.left) / rect.width) * 2 - 1;
         pointerRef.current.y = -((y - rect.top) / rect.height) * 2 + 1;
 
-        // If dragging a cube (and not a marker), update its position.
+        // ── DRAGGING A CUBE ──
         if (activeCubeRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
@@ -518,28 +546,75 @@ function Editable3DObject({
             );
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
-            if (
-                raycaster.ray.intersectPlane(
-                    dragPlaneRef.current,
-                    intersectionPoint
-                )
-            ) {
-                intersectionPoint.add(dragOffsetRef.current);
-                const parent = activeCubeRef.current.parent;
-                if (parent) {
-                    const localPos = parent.worldToLocal(
-                        intersectionPoint.clone()
-                    );
-                    // Instead of directly setting the cube’s position, update its target.
-                    targetCubePositionRef.current.copy(localPos);
+
+            if (source !== "mouse") {
+                // For hand input, use the change in hand depth.
+                const hand =
+                    interactionStateRef.current?.[
+                        source === "rightHand" ? "Right" : "Left"
+                    ];
+                if (hand && typeof hand.depth === "number") {
+                    // Compute the change in depth from when the drag started.
+                    const initialDepth =
+                        initialHandDepthRef.current[source] ?? hand.depth;
+                    const deltaDepth = initialDepth - hand.depth;
+                    const depthSensitivity = 10; // Adjust sensitivity constant as needed
+
+                    // Use the usual drag-plane intersection as the base.
+                    if (
+                        raycaster.ray.intersectPlane(
+                            dragPlaneRef.current,
+                            intersectionPoint
+                        )
+                    ) {
+                        intersectionPoint.add(dragOffsetRef.current);
+                    }
+                    // Compute an additional offset along the ray direction.
+                    const additionalOffset = raycaster.ray.direction
+                        .clone()
+                        .multiplyScalar(deltaDepth * depthSensitivity);
+                    const newPosition = intersectionPoint.add(additionalOffset);
+                    const parent = activeCubeRef.current.parent;
+                    if (parent) {
+                        parent.worldToLocal(newPosition);
+                    }
+                    targetCubePositionRef.current.copy(newPosition);
                 } else {
+                    // Fallback to drag plane intersection.
+                    if (
+                        raycaster.ray.intersectPlane(
+                            dragPlaneRef.current,
+                            intersectionPoint
+                        )
+                    ) {
+                        intersectionPoint.add(dragOffsetRef.current);
+                        const parent = activeCubeRef.current.parent;
+                        if (parent) {
+                            parent.worldToLocal(intersectionPoint);
+                        }
+                        targetCubePositionRef.current.copy(intersectionPoint);
+                    }
+                }
+            } else {
+                // For mouse input, use drag plane intersection.
+                if (
+                    raycaster.ray.intersectPlane(
+                        dragPlaneRef.current,
+                        intersectionPoint
+                    )
+                ) {
+                    intersectionPoint.add(dragOffsetRef.current);
+                    const parent = activeCubeRef.current.parent;
+                    if (parent) {
+                        parent.worldToLocal(intersectionPoint);
+                    }
                     targetCubePositionRef.current.copy(intersectionPoint);
                 }
             }
             return;
         }
 
-        // If dragging a marker, update its position.
+        // ── DRAGGING A MARKER (VERTEX) ──
         if (activeMarkerRef.current && dragPlaneRef.current) {
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2(
@@ -548,21 +623,68 @@ function Editable3DObject({
             );
             raycaster.setFromCamera(mouse, cameraRef.current!);
             const intersectionPoint = new THREE.Vector3();
-            if (
-                raycaster.ray.intersectPlane(
-                    dragPlaneRef.current,
-                    intersectionPoint
-                )
-            ) {
-                intersectionPoint.add(dragOffsetRef.current);
-                const parent = activeMarkerRef.current.parent;
-                if (parent) {
-                    const localPos = parent.worldToLocal(
-                        intersectionPoint.clone()
-                    );
-                    // Instead of copying the position directly, update the target.
-                    targetMarkerPositionRef.current.copy(localPos);
+
+            if (source !== "mouse") {
+                // For hand input, use the change in hand depth.
+                const hand =
+                    interactionStateRef.current?.[
+                        source === "rightHand" ? "Right" : "Left"
+                    ];
+                if (hand && typeof hand.depth === "number") {
+                    const initialDepth =
+                        initialHandDepthRef.current[source] ?? hand.depth;
+                    const deltaDepth = initialDepth - hand.depth;
+                    const depthSensitivity = 10; // Adjust as needed
+
+                    if (
+                        raycaster.ray.intersectPlane(
+                            dragPlaneRef.current,
+                            intersectionPoint
+                        )
+                    ) {
+                        intersectionPoint.add(dragOffsetRef.current);
+                    }
+                    const additionalOffset = raycaster.ray.direction
+                        .clone()
+                        .multiplyScalar(deltaDepth * depthSensitivity);
+                    const newPosition = intersectionPoint.add(additionalOffset);
+                    if (activeMarkerRef.current.parent) {
+                        activeMarkerRef.current.parent.worldToLocal(
+                            newPosition
+                        );
+                    }
+                    targetMarkerPositionRef.current.copy(newPosition);
                 } else {
+                    // Fallback to drag plane intersection.
+                    if (
+                        raycaster.ray.intersectPlane(
+                            dragPlaneRef.current,
+                            intersectionPoint
+                        )
+                    ) {
+                        intersectionPoint.add(dragOffsetRef.current);
+                        if (activeMarkerRef.current.parent) {
+                            activeMarkerRef.current.parent.worldToLocal(
+                                intersectionPoint
+                            );
+                        }
+                        targetMarkerPositionRef.current.copy(intersectionPoint);
+                    }
+                }
+            } else {
+                // For mouse input, use drag plane intersection.
+                if (
+                    raycaster.ray.intersectPlane(
+                        dragPlaneRef.current,
+                        intersectionPoint
+                    )
+                ) {
+                    intersectionPoint.add(dragOffsetRef.current);
+                    if (activeMarkerRef.current.parent) {
+                        activeMarkerRef.current.parent.worldToLocal(
+                            intersectionPoint
+                        );
+                    }
                     targetMarkerPositionRef.current.copy(intersectionPoint);
                 }
             }
@@ -595,6 +717,9 @@ function Editable3DObject({
         activeMarkerRef.current = null;
         activeCubeRef.current = null;
         dragPlaneRef.current = null;
+        // Clear stored initial depths.
+        initialHandDepthRef.current.leftHand = null;
+        initialHandDepthRef.current.rightHand = null;
     };
 
     // ────────────────────────────────────────────────────────────────

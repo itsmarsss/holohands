@@ -13,12 +13,14 @@ interface InteractionStateHand {
         coords: Coords;
         angle: number;
     } | null;
+    depth: number;
 }
 
 const DEFAULT_INTERACTION_STATE_HAND: InteractionStateHand = {
     isHolding: false,
     isPinching: false,
     cursor: null,
+    depth: 0,
 };
 
 const DEFAULT_INTERACTION_STATE: InteractionState = {

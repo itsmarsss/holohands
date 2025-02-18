@@ -6,6 +6,7 @@ import React, {
     useRef,
 } from "react";
 import * as THREE from "three";
+import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 
 interface ThreeDContextType {
     selectObject: (objectName: string) => void;
@@ -19,7 +20,13 @@ interface ThreeDContextType {
     createCube: (
         objectName: string,
         position: THREE.Vector3,
-        color: number
+        faceColor: number
+    ) => THREE.Group;
+    createSphere: (
+        objectName: string,
+        position: THREE.Vector3,
+        radius: number,
+        faceColor: number
     ) => THREE.Group;
     resetCamera: () => void;
     objectsRef: React.MutableRefObject<{
@@ -35,6 +42,7 @@ interface ThreeDContextType {
     resetCameraRef: React.MutableRefObject<boolean>;
     renameObject: (oldName: string, newName: string) => void;
     updateCubeGeometry: (faceMesh: THREE.Mesh) => void;
+    updateSphereGeometry: (sphereMesh: THREE.Mesh) => void;
 }
 
 const ThreeDContext = createContext<ThreeDContextType | null>(null);
@@ -132,8 +140,8 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
             opacity: 0.5,
             transparent: true,
         });
-        const faceMesh = new THREE.Mesh(geometry.clone(), faceMaterial);
-        faceMesh.name = "faceMesh";
+        const hexahredronMesh = new THREE.Mesh(geometry.clone(), faceMaterial);
+        hexahredronMesh.name = "faceMesh";
 
         // Add eight corner markers to the face mesh.
         for (let i = 0; i < 8; i++) {
@@ -147,7 +155,7 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
             marker.position.copy(vertices[i]);
             marker.userData.isCornerMarker = true;
             marker.userData.cornerIndex = i;
-            faceMesh.add(marker);
+            hexahredronMesh.add(marker);
             // Also add the marker to our global marker list.
             cornerMarkersRef.current.push(marker);
         }
@@ -166,14 +174,17 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
         // Group the face mesh and the wireframe.
         const cubeGroup = new THREE.Group();
         cubeGroup.name = objectName;
-        cubeGroup.add(faceMesh);
+        cubeGroup.add(hexahredronMesh);
         cubeGroup.add(wireframeMesh);
         cubeGroup.position.copy(offset);
 
         // Store an update function in the group's userData.
         cubeGroup.userData.updateGeometry = () => {
-            updateCubeGeometry(faceMesh);
-            const newWireframe = new THREE.WireframeGeometry(faceMesh.geometry);
+            console.log("Updating cube geometry");
+            updateCubeGeometry(hexahredronMesh);
+            const newWireframe = new THREE.WireframeGeometry(
+                hexahredronMesh.geometry
+            );
             wireframeMesh.geometry.dispose();
             wireframeMesh.geometry = newWireframe;
         };
@@ -217,29 +228,51 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
             "position",
             new THREE.BufferAttribute(positions, 3)
         );
-
-        // Define the faces (two triangles per face).
         const indices = [
-            // Face 1: "min x" face: markers 0,1,3,2
-            0, 1, 3, 0, 3, 2,
-            // Face 2: "max x" face: markers 4,6,7,5
-            4, 6, 7, 4, 7, 5,
-            // Face 3: "min y" face: markers 0,4,5,1
-            0, 4, 5, 0, 5, 1,
-            // Face 4: "max y" face: markers 2,3,7,6
-            2, 3, 7, 2, 7, 6,
-            // Face 5: "min z" face: markers 0,2,6,4
-            0, 2, 6, 0, 6, 4,
-            // Face 6: "max z" face: markers 1,5,7,3
-            1, 5, 7, 1, 7, 3,
+            0,
+            1,
+            3,
+            0,
+            3,
+            2, // Face 1: markers 0,1,3,2
+            4,
+            6,
+            7,
+            4,
+            7,
+            5, // Face 2: markers 4,6,7,5
+            0,
+            4,
+            5,
+            0,
+            5,
+            1, // Face 3: markers 0,4,5,1
+            2,
+            3,
+            7,
+            2,
+            7,
+            6, // Face 4: markers 2,3,7,6
+            0,
+            2,
+            6,
+            0,
+            6,
+            4, // Face 5: markers 0,2,6,4
+            1,
+            5,
+            7,
+            1,
+            7,
+            3, // Face 6: markers 1,5,7,3
         ];
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
         return geometry;
     };
 
-    const updateCubeGeometry = (faceMesh: THREE.Mesh) => {
-        const markers = faceMesh.children.filter(
+    const updateCubeGeometry = (hexahredronMesh: THREE.Mesh) => {
+        const markers = hexahredronMesh.children.filter(
             (child) => child.userData.isCornerMarker
         );
         if (markers.length !== 8) return; // safety check
@@ -248,8 +281,8 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
         // Extract target vertices from markers.
         const vertices = markers.map((marker) => marker.position.clone());
         const newGeometry = createHexahedronGeometry(vertices);
-        faceMesh.geometry.dispose();
-        faceMesh.geometry = newGeometry;
+        hexahredronMesh.geometry.dispose();
+        hexahredronMesh.geometry = newGeometry;
     };
 
     const selectObject = (objectName: string) => {
@@ -328,18 +361,151 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log(objectsRef.current);
     }, [objectsRef.current]);
 
+    const createSphere = (
+        objectName: string,
+        position: THREE.Vector3,
+        radius: number,
+        faceColor: number
+    ): THREE.Group => {
+        // Create an editable icosphere using preset vertices.
+        const t = (1 + Math.sqrt(5)) / 2;
+        // Raw vertices for a regular icosahedron.
+        const rawVertices = [
+            new THREE.Vector3(-1, t, 0),
+            new THREE.Vector3(1, t, 0),
+            new THREE.Vector3(-1, -t, 0),
+            new THREE.Vector3(1, -t, 0),
+            new THREE.Vector3(0, -1, t),
+            new THREE.Vector3(0, 1, t),
+            new THREE.Vector3(0, -1, -t),
+            new THREE.Vector3(0, 1, -t),
+            new THREE.Vector3(t, 0, -1),
+            new THREE.Vector3(t, 0, 1),
+            new THREE.Vector3(-t, 0, -1),
+            new THREE.Vector3(-t, 0, 1),
+        ];
+
+        // Normalize and scale each vertex to lie on a sphere of the given radius.
+        const vertices = rawVertices.map((v) =>
+            v.clone().normalize().multiplyScalar(radius)
+        );
+
+        // Create icosahedron geometry from the preset control points.
+        const geometry = createIcosahedronGeometry(vertices);
+        const faceMaterial = new THREE.MeshBasicMaterial({
+            color: faceColor,
+            opacity: 0.5,
+            transparent: true,
+        });
+        const icosahedronMesh = new THREE.Mesh(geometry, faceMaterial);
+        icosahedronMesh.name = "faceMesh";
+
+        // Create control markers for each of the 12 vertices.
+        for (let i = 0; i < 12; i++) {
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+            });
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(0.05, 8, 8),
+                markerMaterial
+            );
+            marker.position.copy(vertices[i]);
+            marker.userData.isControlMarker = true;
+            marker.userData.controlIndex = i;
+            icosahedronMesh.add(marker);
+            cornerMarkersRef.current.push(marker);
+        }
+
+        const wireframeGeom = new THREE.WireframeGeometry(geometry.clone());
+        const wireframeMaterial = new THREE.LineBasicMaterial({
+            color: 0x000000,
+        });
+        const wireframeMesh = new THREE.LineSegments(
+            wireframeGeom,
+            wireframeMaterial
+        );
+        wireframeMesh.name = "wireframeMesh";
+
+        // Create a group and add the icosahedron mesh plus each control marker.
+        const sphereGroup = new THREE.Group();
+        sphereGroup.name = objectName;
+        sphereGroup.add(icosahedronMesh);
+        sphereGroup.add(wireframeMesh);
+        sphereGroup.position.copy(position);
+
+        // Provide an updateGeometry method to rebuild the mesh geometry from marker positions.
+        sphereGroup.userData.updateGeometry = () => {
+            console.log("Updating sphere geometry");
+            updateIcosahedronGeometry(icosahedronMesh);
+            const newWireframe = new THREE.WireframeGeometry(
+                icosahedronMesh.geometry
+            );
+            wireframeMesh.geometry.dispose();
+            wireframeMesh.geometry = newWireframe;
+        };
+
+        registerObject(objectName, sphereGroup);
+
+        return sphereGroup;
+    };
+
+    const createIcosahedronGeometry = (
+        vertices: THREE.Vector3[]
+    ): THREE.BufferGeometry => {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(vertices.length * 3);
+        for (let i = 0; i < vertices.length; i++) {
+            positions[i * 3] = vertices[i].x;
+            positions[i * 3 + 1] = vertices[i].y;
+            positions[i * 3 + 2] = vertices[i].z;
+        }
+        geometry.setAttribute(
+            "position",
+            new THREE.BufferAttribute(positions, 3)
+        );
+
+        // Standard indices for a regular icosahedron (20 triangular faces).
+        geometry.setIndex([
+            0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4,
+            11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3,
+            8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1,
+        ]);
+        geometry.computeVertexNormals();
+        return geometry;
+    };
+
+    const updateIcosahedronGeometry = (icosahedronMesh: THREE.Mesh) => {
+        // Retrieve control markers stored in icosahedronMesh.userData.
+        const markers = icosahedronMesh.children.filter(
+            (child) => child.userData.isControlMarker
+        );
+        if (!markers || markers.length !== 12) return;
+
+        // Sort markers by their stored control index.
+        markers.sort(
+            (a, b) => a.userData.controlIndex - b.userData.controlIndex
+        );
+
+        // Extract updated vertices from the markers.
+        const vertices = markers.map((marker) => marker.position.clone());
+        const newGeometry = createIcosahedronGeometry(vertices);
+        icosahedronMesh.geometry.dispose();
+        icosahedronMesh.geometry = newGeometry;
+    };
+
     const threeDContextValue: ThreeDContextType = useMemo(() => {
         return {
             selectObject,
             setObjectVisibility,
-            renameObject,
             registerObject,
             unregisterObject,
             setupScene,
             createCube,
+            createSphere,
+            updateSphereGeometry: updateIcosahedronGeometry,
             resetCamera,
-            renderScene,
             objectsRef,
+            renderScene,
             cameraRef,
             sceneRef,
             mainGroupRef,
@@ -347,6 +513,7 @@ export const ThreeDProvider: React.FC<{ children: React.ReactNode }> = ({
             cornerMarkersRef,
             zoomRef,
             resetCameraRef,
+            renameObject,
             updateCubeGeometry,
         };
     }, []);

@@ -38,6 +38,10 @@ function Editable3DObject({
     const dragOffsetRef = useRef(new THREE.Vector3());
     const dragPlaneRef = useRef<THREE.Plane | null>(null);
 
+    // NEW: Refs for right-click drag panning using mouse.
+    const isRightDraggingRef = useRef(false);
+    const lastRightPositionRef = useRef<{ x: number; y: number } | null>(null);
+
     // NEW: Ref to store the target position for the currently dragged marker.
     const targetMarkerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
@@ -206,6 +210,21 @@ function Editable3DObject({
                 if (cubeGroup && cubeGroup.userData.updateGeometry) {
                     cubeGroup.userData.updateGeometry();
                 }
+
+                // if (
+                //     activeMarkerRef.current &&
+                //     activeMarkerRef.current.userData.isControlMarker
+                // ) {
+                //     // Assuming the marker is a child of the sphere group:
+                //     const parentGroup = activeMarkerRef.current.parent;
+                //     if (parentGroup && parentGroup.userData.updateGeometry) {
+                //         console.log(
+                //             "Updating sphere geometry for",
+                //             parentGroup.name
+                //         );
+                //         parentGroup.userData.updateGeometry();
+                //     }
+                // }
             }
 
             // Update pointer from hand tracking if available.
@@ -772,15 +791,56 @@ function Editable3DObject({
     useEffect(() => {
         const element = mountRef.current;
         if (!element) return;
+
+        // NEW: Handler to prevent the context menu.
+        const onContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
+        };
+
         const onMouseDown = (e: MouseEvent) => {
-            cursorDown(e.clientX, e.clientY, "mouse");
+            if (e.button === 2) {
+                // Right-click
+                e.preventDefault();
+                isRightDraggingRef.current = true;
+                lastRightPositionRef.current = { x: e.clientX, y: e.clientY };
+            } else if (e.button === 0) {
+                // Left-click
+                cursorDown(e.clientX, e.clientY, "mouse");
+            }
         };
+
         const onMouseMove = (e: MouseEvent) => {
-            cursorMove(e.clientX, e.clientY, "mouse");
+            if (isRightDraggingRef.current) {
+                if (lastRightPositionRef.current && cameraRef.current) {
+                    const dx = e.clientX - lastRightPositionRef.current.x;
+                    const dy = e.clientY - lastRightPositionRef.current.y;
+                    const panSensitivity = 0.01; // Adjust pan sensitivity as needed
+                    const panDelta = new THREE.Vector3(
+                        -dx * panSensitivity,
+                        dy * panSensitivity,
+                        0
+                    );
+                    targetCameraPositionRef.current.add(panDelta);
+                    lastRightPositionRef.current = {
+                        x: e.clientX,
+                        y: e.clientY,
+                    };
+                }
+            } else {
+                cursorMove(e.clientX, e.clientY, "mouse");
+            }
         };
-        const onMouseUp = () => {
-            cursorUp();
+
+        const onMouseUp = (e: MouseEvent) => {
+            if (e.button === 2) {
+                isRightDraggingRef.current = false;
+                lastRightPositionRef.current = null;
+                e.preventDefault();
+            } else {
+                cursorUp();
+            }
         };
+
         // Add wheel event for zooming.
         const onWheel = (e: WheelEvent) => {
             e.preventDefault();
@@ -794,12 +854,16 @@ function Editable3DObject({
                 targetZoomRef.current = newZoom;
             }
         };
+
+        element.addEventListener("contextmenu", onContextMenu);
         element.addEventListener("mousedown", onMouseDown);
         element.addEventListener("mousemove", onMouseMove);
         element.addEventListener("mouseup", onMouseUp);
         element.addEventListener("mouseleave", onMouseUp);
         element.addEventListener("wheel", onWheel, { passive: false });
+
         return () => {
+            element.removeEventListener("contextmenu", onContextMenu);
             element.removeEventListener("mousedown", onMouseDown);
             element.removeEventListener("mousemove", onMouseMove);
             element.removeEventListener("mouseup", onMouseUp);

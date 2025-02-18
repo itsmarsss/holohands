@@ -31,12 +31,15 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     // NEW: Refs for menu buttons
     const resetBtnRef = useRef<HTMLButtonElement>(null);
     const insertBtnRef = useRef<HTMLButtonElement>(null);
+    const insertSphereBtnRef = useRef<HTMLButtonElement>(null);
 
     // NEW: Refs for hover timers for each menu option
     const resetHoverTimerRef = useRef<number | null>(null);
     const resetHoverStartRef = useRef<number | null>(null);
     const insertHoverTimerRef = useRef<number | null>(null);
     const insertHoverStartRef = useRef<number | null>(null);
+    const insertSphereHoverStartRef = useRef<number | null>(null);
+    const insertSphereHoverTimerRef = useRef<number | null>(null);
 
     // NEW: State for showing a menu when pinching starts
     const menuRef = useRef<{ x: number; y: number } | null>(null);
@@ -45,7 +48,7 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
     // NEW: Ref to track when the menu was activated for timer animation on the circle
     const menuStartTimeRef = useRef<number | null>(null);
 
-    const { resetCamera, createCube } = useThreeD();
+    const { resetCamera, createCube, createSphere } = useThreeD();
 
     const [_, forceUpdate] = useReducer((x) => x + 1, 0);
 
@@ -67,6 +70,25 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
         createCube(
             `cube-${Math.random().toString(36).substring(2, 9)}`,
             new THREE.Vector3(0, 0, 0),
+            Math.random() * 0xffffff
+        );
+
+        menuRef.current = null;
+        // Activate cooldown to prevent immediate reappearance
+        menuCooldownRef.current = true;
+        forceUpdate();
+        setTimeout(() => {
+            menuCooldownRef.current = false;
+            forceUpdate();
+        }, 1000);
+    };
+
+    // NEW: Handler to insert a sphere.
+    const handleInsertSphere = () => {
+        createSphere(
+            `sphere-${Math.random().toString(36).substring(2, 9)}`,
+            new THREE.Vector3(0, 0, 0),
+            0.75, // You can adjust the sphere radius as needed.
             Math.random() * 0xffffff
         );
 
@@ -152,6 +174,7 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
             // Calculate the progress value from menu button hover only.
             let resetProgress = 0;
             let insertProgress = 0;
+            let insertSphereProgress = 0;
 
             if (resetHoverStartRef.current) {
                 resetProgress = Math.min(
@@ -165,6 +188,13 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
                     1
                 );
             }
+            if (insertSphereHoverStartRef.current) {
+                insertSphereProgress = Math.min(
+                    (Date.now() - insertSphereHoverStartRef.current) / 1000,
+                    1
+                );
+            }
+
             const maxProgress = Math.max(resetProgress, insertProgress);
 
             if (progressRef.current) {
@@ -261,6 +291,47 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
                         insertBtnRef.current.style.background = "";
                     }
                 }
+
+                // Process Insert Sphere button
+                if (insertSphereBtnRef.current) {
+                    const btnRect =
+                        insertSphereBtnRef.current.getBoundingClientRect();
+                    if (
+                        absoluteCursorX >= btnRect.left &&
+                        absoluteCursorX <= btnRect.right &&
+                        absoluteCursorY >= btnRect.top &&
+                        absoluteCursorY <= btnRect.bottom
+                    ) {
+                        if (!insertSphereHoverStartRef.current) {
+                            insertSphereHoverStartRef.current = Date.now();
+                            insertSphereHoverTimerRef.current =
+                                window.setTimeout(() => {
+                                    handleInsertSphere();
+                                    insertSphereHoverStartRef.current = null;
+                                    insertSphereHoverTimerRef.current = null;
+                                    if (insertSphereBtnRef.current) {
+                                        insertSphereBtnRef.current.style.background =
+                                            "";
+                                    }
+                                }, 1000);
+                        }
+                        const progress = Math.min(
+                            (Date.now() - insertSphereHoverStartRef.current) /
+                                1000,
+                            1
+                        );
+                        insertSphereBtnRef.current.style.background = `linear-gradient(to right, rgba(255,255,255,0.3) ${
+                            progress * 100
+                        }%, transparent ${progress * 100}%)`;
+                    } else {
+                        if (insertSphereHoverTimerRef.current) {
+                            clearTimeout(insertSphereHoverTimerRef.current);
+                            insertSphereHoverTimerRef.current = null;
+                            insertSphereHoverStartRef.current = null;
+                        }
+                        insertSphereBtnRef.current.style.background = "";
+                    }
+                }
             } else {
                 if (insertHoverTimerRef.current) {
                     clearTimeout(insertHoverTimerRef.current);
@@ -325,6 +396,12 @@ function Cursor({ name, handRef, overlayCanvasRef }: CursorProps) {
                     </button>
                     <button ref={insertBtnRef} onClick={handleInsertCube}>
                         Insert Cube
+                    </button>
+                    <button
+                        ref={insertSphereBtnRef}
+                        onClick={handleInsertSphere}
+                    >
+                        Insert Sphere
                     </button>
                 </div>
             )}
